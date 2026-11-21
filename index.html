@@ -1,0 +1,3053 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>骨科值班系統</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+/* ─── Layout: sidebar nav + main content, mobile stacks ─── */
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface2: #f0f2f5;
+  --border: #e2e6ec;
+  --fg: #1a1d23;
+  --fg2: #5a6072;
+  --fg3: #8c93a3;
+  --accent: #2563c8;
+  --accent-light: #dbeafe;
+  --accent-dark: #1a46a0;
+  --sidebar-bg: #e8eaed;
+  --sidebar-fg: #2a3040;
+  --sidebar-fg2: #6b7280;
+  --sidebar-border: #c0c4cc;
+  --sidebar-active-bg: rgba(37,99,200,0.12);
+  --sidebar-active-fg: #1a46a0;
+  --sidebar-hover: rgba(0,0,0,0.06);
+  --sidebar-logo: #2563c8;
+  --success: #16a34a;
+  --success-light: #dcfce7;
+  --warn: #d97706;
+  --warn-light: #fef3c7;
+  --danger: #dc2626;
+  --danger-light: #fee2e2;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font: 'Noto Sans TC', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2d3148;
+    --fg: #e8eaf0;
+    --fg2: #9ba3bc;
+    --fg3: #6b7494;
+    --accent: #4b82f0;
+    --accent-light: #1e2f5a;
+    --accent-dark: #6b9af8;
+    --sidebar-bg: #e8eaed;
+    --sidebar-fg: #2a3040;
+    --sidebar-fg2: #6b7280;
+    --sidebar-border: #c0c4cc;
+    --sidebar-active-bg: rgba(37,99,200,0.12);
+    --sidebar-active-fg: #1a46a0;
+    --sidebar-hover: rgba(0,0,0,0.06);
+    --sidebar-logo: #2563c8;
+    --success: #22c55e;
+    --success-light: #14391e;
+    --warn: #f59e0b;
+    --warn-light: #3a2800;
+    --danger: #f87171;
+    --danger-light: #3b1212;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #22263a;
+  --border: #2d3148;
+  --fg: #e8eaf0;
+  --fg2: #9ba3bc;
+  --fg3: #6b7494;
+  --accent: #4b82f0;
+  --accent-light: #1e2f5a;
+  --accent-dark: #6b9af8;
+  --sidebar-bg: #e8eaed;
+  --sidebar-fg: #2a3040;
+  --sidebar-fg2: #6b7280;
+  --sidebar-border: #c0c4cc;
+  --sidebar-active-bg: rgba(37,99,200,0.12);
+  --sidebar-active-fg: #1a46a0;
+  --sidebar-hover: rgba(0,0,0,0.06);
+  --sidebar-logo: #2563c8;
+  --success: #22c55e;
+  --success-light: #14391e;
+  --warn: #f59e0b;
+  --warn-light: #3a2800;
+  --danger: #f87171;
+  --danger-light: #3b1212;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-left: max(0px, env(safe-area-inset-left, 0px));
+  padding-right: max(0px, env(safe-area-inset-right, 0px));
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* topbar / cards float above grid */
+.topbar, .page, .card, .stat-card, .modal-overlay { position: relative; z-index: 1; }
+
+/* ─── App Shell ─── */
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: linear-gradient(160deg,
+    #f8f9fa 0%, #e8eaed 12%, #f4f5f7 25%, #d8dadf 40%,
+    #eceef1 55%, #c8cace 70%, #dfe1e5 85%, #b8bcc4 100%);
+  border-right: 1px solid #c0c4cc;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar-logo {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.sidebar-logo .logo-mark {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--sidebar-logo);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.sidebar-logo h1 {
+  font-size: 15px;
+  color: var(--sidebar-fg);
+  font-weight: 700;
+  color: var(--fg);
+  line-height: 1.3;
+}
+
+.nav {
+  padding: 12px 8px;
+  flex: 1;
+}
+
+.nav-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sidebar-fg2);
+  padding: 8px 12px 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sidebar-fg);
+  transition: background 0.15s, color 0.15s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.nav-item:hover { background: var(--sidebar-hover); color: #fff; }
+.nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-fg); font-weight: 600; }
+
+.nav-item .icon { font-size: 16px; flex-shrink: 0; }
+
+.nav-badge {
+  margin-left: auto;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 99px;
+}
+
+/* ─── Main ─── */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* Crumpled paper base color */
+  background-color: #f0ece4;
+  /* Paper texture: subtle diagonal fiber lines + light/shadow patches */
+  background-image:
+    /* Fine grain overlay */
+    repeating-linear-gradient(
+      47deg,
+      transparent 0px, transparent 2px,
+      rgba(180,160,130,0.03) 2px, rgba(180,160,130,0.03) 3px
+    ),
+    repeating-linear-gradient(
+      -38deg,
+      transparent 0px, transparent 3px,
+      rgba(200,185,160,0.04) 3px, rgba(200,185,160,0.04) 4px
+    ),
+    /* Crumple highlight/shadow patches */
+    radial-gradient(ellipse 60% 20% at 20% 15%, rgba(255,252,245,0.55) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 25% at 75% 30%, rgba(220,210,195,0.4) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 15% at 55% 60%, rgba(255,250,240,0.45) 0%, transparent 70%),
+    radial-gradient(ellipse 35% 30% at 10% 70%, rgba(210,200,185,0.35) 0%, transparent 65%),
+    radial-gradient(ellipse 45% 20% at 85% 80%, rgba(240,235,225,0.5) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 40% 90%, rgba(255,252,245,0.4) 0%, transparent 65%),
+    /* Subtle warm-tone crease lines */
+    repeating-linear-gradient(
+      112deg,
+      transparent 0px, transparent 60px,
+      rgba(170,150,120,0.025) 60px, rgba(170,150,120,0.025) 61px
+    ),
+    repeating-linear-gradient(
+      68deg,
+      transparent 0px, transparent 90px,
+      rgba(160,140,110,0.02) 90px, rgba(160,140,110,0.02) 91px
+    );
+}
+
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px max(20px, env(safe-area-inset-right, 0px)) 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-title { font-size: 17px; font-weight: 700; flex: 1; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s, background 0.15s;
+}
+.btn:active { opacity: 0.8; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-secondary { background: var(--surface2); color: var(--fg); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--border); }
+.btn-danger { background: var(--danger-light); color: var(--danger); }
+.btn-success { background: var(--success-light); color: var(--success); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+.page { padding: 24px; flex: 1; }
+
+/* ─── Cards / panels ─── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-header h2 { font-size: 15px; font-weight: 700; }
+.card-body { padding: 20px; }
+
+/* ─── Stats row ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.stat-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg3); margin-bottom: 6px; }
+.stat-value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.stat-sub { font-size: 12px; color: var(--fg2); margin-top: 4px; }
+
+/* ─── Table ─── */
+.table-wrap { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  background: var(--surface2);
+  text-align: left;
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg3);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface2); }
+tbody td { padding: 10px 14px; vertical-align: middle; }
+
+/* ─── Chips / badges ─── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.chip-blue { background: var(--accent-light); color: var(--accent); }
+.chip-green { background: var(--success-light); color: var(--success); }
+.chip-orange { background: var(--warn-light); color: var(--warn); }
+.chip-red { background: var(--danger-light); color: var(--danger); }
+.chip-gray { background: var(--surface2); color: var(--fg2); }
+
+/* ─── Calendar grid for schedule ─── */
+.cal-outer { overflow-x: auto; }
+
+.schedule-table { min-width: 900px; width: 100%; border-collapse: collapse; font-size: 12px; }
+.schedule-table th {
+  background: var(--surface2);
+  padding: 8px 10px;
+  text-align: center;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg2);
+  white-space: nowrap;
+}
+.schedule-table td {
+  border: 1px solid var(--border);
+  padding: 5px 6px;
+  vertical-align: top;
+  min-width: 80px;
+}
+.day-header {
+  background: var(--surface2);
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 4px;
+}
+.day-header.weekend { background: var(--accent-light); color: var(--accent); }
+.day-header.holiday-col { background: var(--warn-light); color: var(--warn); }
+
+.slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.slot:hover { opacity: 0.8; }
+.slot.ward { background: #dbeafe; color: #1d4ed8; }
+.slot.er { background: #dcfce7; color: #15803d; }
+.slot.trauma { background: #fce7f3; color: #be185d; }
+.slot.pgy { background: #fef9c3; color: #a16207; }
+.slot.liu-yuan { background: #ede9fe; color: #6d28d9; }
+.slot.pinri { background: #e0f2fe; color: #0369a1; }
+.slot.jiari { background: #fef3c7; color: #b45309; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .slot.ward { background: #1e3a6e; color: #93c5fd; }
+  :root:not([data-theme="light"]) .slot.er { background: #14391e; color: #86efac; }
+  :root:not([data-theme="light"]) .slot.trauma { background: #4a1230; color: #f9a8d4; }
+  :root:not([data-theme="light"]) .slot.pgy { background: #3b2800; color: #fde047; }
+  :root:not([data-theme="light"]) .slot.liu-yuan { background: #2e1065; color: #c4b5fd; }
+  :root:not([data-theme="light"]) .slot.pinri { background: #0c2a3a; color: #7dd3fc; }
+  :root:not([data-theme="light"]) .slot.jiari { background: #3a2000; color: #fcd34d; }
+}
+:root[data-theme="dark"] .slot.ward { background: #1e3a6e; color: #93c5fd; }
+:root[data-theme="dark"] .slot.er { background: #14391e; color: #86efac; }
+:root[data-theme="dark"] .slot.trauma { background: #4a1230; color: #f9a8d4; }
+:root[data-theme="dark"] .slot.pgy { background: #3b2800; color: #fde047; }
+:root[data-theme="dark"] .slot.liu-yuan { background: #2e1065; color: #c4b5fd; }
+:root[data-theme="dark"] .slot.pinri { background: #0c2a3a; color: #7dd3fc; }
+:root[data-theme="dark"] .slot.jiari { background: #3a2000; color: #fcd34d; }
+
+.slot .remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 12px;
+  padding: 0;
+  display: none;
+}
+.slot:hover .remove-btn { display: block; }
+
+.add-slot-btn {
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fg3);
+  font-size: 11px;
+  padding: 3px 0;
+  text-align: center;
+  border-radius: 4px;
+  display: none;
+}
+td:hover .add-slot-btn { display: block; }
+.add-slot-btn:hover { background: var(--surface2); }
+
+/* ─── Reply form (doctor view) ─── */
+.form-section { max-width: 600px; margin: 0 auto; }
+
+.form-group { margin-bottom: 20px; }
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--fg);
+}
+.form-hint { font-size: 11px; color: var(--fg3); margin-bottom: 8px; }
+
+.day-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.day-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+}
+
+.day-btn:hover { border-color: var(--accent); color: var(--accent); }
+.day-btn.selected { background: var(--danger); border-color: var(--danger); color: #fff; }
+.day-btn.weekend { border-color: var(--accent-light); color: var(--accent); }
+.day-btn.weekend.selected { background: var(--danger); border-color: var(--danger); color: #fff; }
+.day-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.day-btn.has-weekend-warning { background: var(--warn-light); border-color: var(--warn); }
+
+.warning-box {
+  background: var(--danger-light);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--danger);
+  display: none;
+  margin-top: 12px;
+}
+
+.info-box {
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+
+/* ─── Email log ─── */
+.email-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.email-item:last-child { border-bottom: none; }
+.email-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ─── Modal ─── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.modal-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-header h3 { font-size: 16px; font-weight: 700; }
+.modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--fg3);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+}
+.modal-body { padding: 20px; }
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* ─── Progress ─── */
+.progress-bar {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.4s;
+}
+
+/* ─── Tabs ─── */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  background: var(--surface);
+}
+.tab-btn {
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg3);
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: var(--font);
+  transition: color 0.15s;
+}
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ─── Topbar hamburger (mobile) ─── */
+.hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 22px;
+  padding: 0;
+}
+
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 49; }
+
+@media (max-width: 700px) {
+  .sidebar {
+    position: fixed;
+    left: 0; top: 0;
+    height: 100%;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .hamburger { display: flex; }
+  .sidebar-overlay.active { display: block; }
+  .page { padding: 16px; }
+  .topbar { padding-left: 16px; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* ─── Select ─── */
+select, input[type="text"], input[type="email"] {
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s;
+}
+select:focus, input:focus { border-color: var(--accent); }
+
+/* ─── Notification dot ─── */
+.dot-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* ─── Validation summary ─── */
+.validation-list { list-style: none; }
+.validation-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.validation-list li:last-child { border-bottom: none; }
+
+.assign-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface2);
+  color: var(--fg2);
+  margin: 1px;
+}
+
+/* ─── Doctor reply page specific ─── */
+.reply-header {
+  background: var(--accent);
+  padding: 32px 24px 28px;
+  color: #fff;
+}
+.reply-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.reply-header p { font-size: 14px; opacity: 0.85; }
+.reply-body { padding: 24px; max-width: 560px; margin: 0 auto; }
+</style>
+
+<div class="app" id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">骨科部</div>
+      <h1>值班管理系統</h1>
+    </div>
+    <nav class="nav">
+      <div class="nav-section-label">管理者</div>
+      <button class="nav-item active" onclick="showPage('dashboard')">
+        <span class="icon">📊</span> 總覽
+      </button>
+      <button class="nav-item" onclick="showPage('replies')">
+        <span class="icon">📋</span> 回覆狀況
+        <span class="nav-badge" id="pending-badge">0</span>
+      </button>
+      <button class="nav-item" onclick="showPage('schedule')">
+        <span class="icon">📅</span> 排班管理
+      </button>
+      <button class="nav-item" onclick="showPage('secretary-settings')">
+        <span class="icon">⚙️</span> 秘書設定
+      </button>
+      <div class="nav-section-label" style="margin-top:12px">醫師</div>
+      <button class="nav-item" onclick="showPage('doctor-reply')">
+        <span class="icon">🖊️</span> 填寫不值班日期
+      </button>
+      <div class="nav-section-label" style="margin-top:12px">設定</div>
+      <button class="nav-item" onclick="showPage('staff')">
+        <span class="icon">👥</span> 人員設定
+      </button>
+    </nav>
+    <!-- Month switcher at bottom of sidebar -->
+    <div id="sidebar-month" style="padding:14px 16px;border-top:1px solid var(--sidebar-border);margin-top:auto">
+      <div style="font-size:11px;font-weight:600;color:var(--sidebar-fg2);letter-spacing:.05em;margin-bottom:8px">排班月份</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button onclick="shiftMonth(-1)" style="background:rgba(0,0,0,0.08);border:1px solid var(--sidebar-border);border-radius:var(--radius-sm);width:28px;height:28px;cursor:pointer;color:var(--sidebar-fg);font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0">‹</button>
+        <div id="sidebar-month-label" style="flex:1;text-align:center;font-weight:700;font-size:15px;color:var(--sidebar-fg)"></div>
+        <button onclick="shiftMonth(1)" style="background:rgba(0,0,0,0.08);border:1px solid var(--sidebar-border);border-radius:var(--radius-sm);width:28px;height:28px;cursor:pointer;color:var(--sidebar-fg);font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0">›</button>
+      </div>
+    </div>
+  </aside>
+  <div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title" id="page-title">總覽</div>
+      <div id="topbar-actions"></div>
+    </header>
+
+    <!-- Pages -->
+    <div id="page-dashboard" class="page">
+      <!-- filled by JS -->
+    </div>
+
+    <div id="page-replies" class="page" hidden>
+    </div>
+
+    <div id="page-schedule" class="page" hidden>
+    </div>
+
+    <div id="page-email" class="page" hidden>
+    </div>
+
+    <div id="page-secretary-settings" class="page" hidden>
+    </div>
+
+    <div id="page-doctor-reply" hidden>
+    </div>
+
+    <div id="page-staff" class="page" hidden>
+    </div>
+  </div>
+</div>
+
+<!-- Slot edit modal -->
+<div class="modal-overlay" id="slot-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="slot-modal-title">編輯值班</h3>
+      <button class="modal-close" onclick="closeModal('slot-modal')">×</button>
+    </div>
+    <div class="modal-body" id="slot-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('slot-modal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmSlotEdit()">確認</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="confirm-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="confirm-title">確認操作</h3>
+      <button class="modal-close" onclick="closeModal('confirm-modal')">×</button>
+    </div>
+    <div class="modal-body" id="confirm-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('confirm-modal')">取消</button>
+      <button class="btn btn-primary" id="confirm-ok">確認</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+// Shift types: Ward (指定日期, 7人負責), ER (每天, 10人), Trauma (指定日期, 3人)
+const SHIFTS = ['Ward','ER','Trauma'];
+const SHIFT_CLASS = { 'Ward':'ward', 'ER':'er', 'Trauma':'trauma' };
+
+// Staff role groups
+const WARD_STAFF  = ['江毅彥','張書豪','徐得愷','羅文鴻','洪嘉鴻','葉炳君','李元甫'];
+const TRAUMA_STAFF = ['陳勇璋','李宗霖','王俊量'];
+
+const DOW = ['日','一','二','三','四','五','六'];
+
+const STAFF = [
+  {id:'江毅彥', email:'', color:'#3b82f6'},
+  {id:'張書豪', email:'', color:'#10b981'},
+  {id:'徐得愷', email:'', color:'#8b5cf6'},
+  {id:'陳勇璋', email:'', color:'#f59e0b'},
+  {id:'王俊量', email:'', color:'#ef4444'},
+  {id:'羅文鴻', email:'', color:'#06b6d4'},
+  {id:'洪嘉鴻', email:'', color:'#d946ef'},
+  {id:'葉炳君', email:'', color:'#84cc16'},
+  {id:'李元甫', email:'', color:'#f97316'},
+  {id:'李宗霖', email:'', color:'#6366f1'},
+];
+
+// ─── Holiday helpers ─────────────────────────────────────────────────────────
+function getMonthKey() {
+  const {year, month} = state.currentMonth;
+  return `${year}-${month}`;
+}
+
+function isHoliday(year, month, day) {
+  // Base: Sat/Sun
+  const dow = new Date(year, month-1, day).getDay();
+  const isWeekend = (dow === 0 || dow === 6);
+  const key = `${year}-${month}`;
+  const extra = (state?.secretarySettings?.holidays?.[key] || []);
+  const workday = (state?.secretarySettings?.extraWorkdays?.[key] || []);
+  // Extra national holidays count as holiday;補班 workdays override weekend
+  if (workday.includes(day)) return false;
+  return isWeekend || extra.includes(day);
+}
+
+// Read year/month from URL hash (#year=YYYY&month=MM) or query string
+function getUserFromURL() {
+  try { return new URLSearchParams(location.search).get('user') || ''; }
+  catch(e) { return ''; }
+}
+function getMonthFromURL() {
+  // Try hash format: #fill/YYYY/MM
+  try {
+    const h = location.hash || '';
+    const m = h.match(/#fill-(\d{4})-(\d{2})/);
+    if (m) {
+      const y = parseInt(m[1]), mo = parseInt(m[2]);
+      if (y && mo >= 1 && mo <= 12) return {year: y, month: mo};
+    }
+  } catch(e) {}
+  // Fallback: query string
+  try {
+    const p = new URLSearchParams(location.search);
+    const y = parseInt(p.get('year')), mo = parseInt(p.get('month'));
+    if (y && mo >= 1 && mo <= 12) return {year: y, month: mo};
+  } catch(e) {}
+  return null;
+}
+
+let state = loadState();
+
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('schedule-app-v2') || 'null');
+    if (s) return s;
+  } catch(e) {}
+  // Default state — pre-load Nov 2026 schedule
+  return {
+    currentMonth: {year: 2026, month: 11},
+    staff: STAFF.map(s => ({...s, email: s.id+'@hospital.tw'})),
+    // replies now stored in db (replies/{month}/doctors/{name})
+    schedule: {
+      '2026-11': buildNov2026Schedule()
+    },
+    emailLog: [],
+    autoScheduled: true,
+    secretaryEmail: '',
+    // 秘書設定
+    secretarySettings: {
+      traumaPreset: {},     // {year-month: {day: name}} 秘書預設 trauma
+      wardPreset: {},       // {year-month: [days]} 秘書指定 ward 班日期
+      fixedAssign: {},      // {year-month: {type: {day: name}}} 秘書指定特定天特定人 (trauma/ward/er)
+      holidays: {},         // {year-month: [days]} 國定假日/補班（額外假日）
+      extraWorkdays: {},    // {year-month: [days]} 補班（原本是假日但需上班）
+    },
+    notifyLog: {},          // {year-month: timestamp} 20日通知發送紀錄
+  };
+}
+
+// Pre-computed November 2026 schedule (verified, all constraints satisfied)
+function buildNov2026Schedule() {
+  const trauma = {1:'王俊量', 9:'李宗霖', 15:'陳勇璋', 19:'王俊量', 22:'陳勇璋', 25:'李宗霖'};
+  const ward   = {2:'江毅彥', 4:'葉炳君', 7:'洪嘉鴻', 8:'葉炳君', 10:'洪嘉鴻', 12:'李元甫',
+                  14:'羅文鴻', 17:'張書豪', 20:'江毅彥', 21:'張書豪', 28:'李元甫', 29:'徐得愷'};
+  const freeER = {3:'羅文鴻', 5:'王俊量', 6:'李元甫', 11:'徐得愷', 13:'江毅彥', 16:'羅文鴻',
+                  18:'徐得愷', 23:'張書豪', 24:'洪嘉鴻', 26:'陳勇璋', 27:'李宗霖', 30:'葉炳君'};
+  const sched = {};
+  for (let d = 1; d <= 30; d++) {
+    sched[d] = {};
+    if (trauma[d]) sched[d]['Trauma'] = trauma[d];
+    if (ward[d])   sched[d]['Ward']   = ward[d];
+    // ER: coupled from trauma or ward, otherwise free
+    sched[d]['ER'] = trauma[d] || ward[d] || freeER[d];
+  }
+  return sched;
+}
+
+// ─── Supabase-backed data layer ───────────────────────────────────────────────
+// replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
+// Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
+// with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
+const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
+let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
+let _isSecretary = false;
+let _dbChan = null;
+let _curMonthKey = null;
+
+function getMonthKey(year, month) {
+  const {year: y, month: m} = (year == null) ? state.currentMonth : {year, month};
+  return `${y}-${String(m).padStart(2,'0')}`;
+}
+
+function getReplies() { return dbReplies; }
+
+async function loadReplies(monthKey) {
+  const {data, error} = await sb.from('replies').select('*').eq('month', monthKey);
+  if (error) { console.warn('load replies failed', error); showToast('⚠️ 讀取回覆失敗：' + error.message); return; }
+  if (monthKey !== _curMonthKey) return;       // user already switched month
+  const fresh = {};
+  data.forEach(r => { fresh[r.doctor_name] = {
+    offDays: r.off_days || [], preferDays: r.prefer_days || [],
+    submittedAt: new Date(r.submitted_at).getTime() }; });
+  dbReplies = fresh;
+  if (currentPage === 'replies' || currentPage === 'dashboard') renderPage(currentPage);
+}
+
+function subscribeReplies(monthKey) {
+  _curMonthKey = monthKey;
+  if (_dbChan) { sb.removeChannel(_dbChan); _dbChan = null; }
+  if (!_isSecretary) return;                   // doctors never read the table
+  loadReplies(monthKey);
+  _dbChan = sb.channel('replies-' + monthKey)
+    .on('postgres_changes', {event: '*', schema: 'public', table: 'replies', filter: `month=eq.${monthKey}`},
+        () => loadReplies(monthKey))
+    .subscribe();
+}
+
+async function saveReply(name, offDays, preferDays) {
+  const monthKey = getMonthKey(state._fillMonthOverride?.year, state._fillMonthOverride?.month);
+  const {error} = await sb.rpc('submit_reply', {
+    p_month: monthKey, p_name: name, p_off: offDays, p_prefer: preferDays });
+  if (error) throw error;
+  if (_isSecretary) loadReplies(monthKey);
+}
+
+// Doctor side: fetch one's own previous reply (anonymous RPC)
+async function fetchMyReply(name) {
+  const monthKey = getMonthKey(state._fillMonthOverride?.year, state._fillMonthOverride?.month);
+  const {data, error} = await sb.rpc('get_reply', {p_month: monthKey, p_name: name});
+  if (error || !data || !data.length) return null;
+  return {offDays: data[0].off_days || [], preferDays: data[0].prefer_days || []};
+}
+
+async function deleteReply(name) {
+  const monthKey = getMonthKey();
+  const {error} = await sb.from('replies').delete().eq('month', monthKey).eq('doctor_name', name);
+  if (error) { showToast('⚠️ 刪除失敗：' + error.message); return; }
+  delete dbReplies[name];
+}
+
+async function clearMonthReplies() {
+  const monthKey = getMonthKey();
+  const {error} = await sb.from('replies').delete().eq('month', monthKey);
+  if (error) { showToast('⚠️ 清除失敗：' + error.message); return; }
+  dbReplies = {};
+}
+
+// ─── Secretary state (schedule, staff, settings) synced to app_state ─────────
+let _syncTimer = null;
+function persistableState() {
+  const out = {};
+  Object.keys(state).forEach(k => { if (!k.startsWith('_') && k !== 'repliesByMonth') out[k] = state[k]; });
+  return out;
+}
+function saveState() {
+  try { localStorage.setItem('schedule-app-v2', JSON.stringify(state)); } catch(e) {}
+  if (!_isSecretary) return;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(syncRemoteState, 800);
+}
+async function syncRemoteState() {
+  const {error} = await sb.from('app_state').upsert({id: 1, data: persistableState(), updated_at: new Date().toISOString()});
+  if (error) { showToast('⚠️ 雲端同步失敗：' + error.message); return; }
+  // keep the doctor list (used by the fill page) in step with 人員設定
+  const names = state.staff.map(s => s.id);
+  await sb.from('doctors').upsert(names.map((n, i) => ({name: n, sort_order: i})));
+  const {data: existing} = await sb.from('doctors').select('name');
+  const stale = (existing || []).map(d => d.name).filter(n => !names.includes(n));
+  if (stale.length) await sb.from('doctors').delete().in('name', stale);
+}
+async function loadRemoteState() {
+  const {data, error} = await sb.from('app_state').select('data').eq('id', 1).maybeSingle();
+  if (error) { showToast('⚠️ 讀取雲端資料失敗：' + error.message); return; }
+  if (data && data.data) { state = Object.assign(state, data.data); try { localStorage.setItem('schedule-app-v2', JSON.stringify(state)); } catch(e) {} }
+  else await syncRemoteState();               // first login: seed cloud with current data
+}
+
+// ─── Secretary login gate ────────────────────────────────────────────────────
+function showAuthGate(msg) {
+  let g = document.getElementById('auth-gate');
+  if (!g) { g = document.createElement('div'); g.id = 'auth-gate';
+    g.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px';
+    document.body.appendChild(g); }
+  g.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;max-width:360px;width:100%;box-shadow:0 4px 20px rgba(0,0,0,.08)">
+      <div style="font-size:40px;text-align:center">🔐</div>
+      <h2 style="text-align:center;margin:8px 0 20px">秘書登入</h2>
+      <input id="auth-email" type="email" placeholder="Email" autocomplete="username" style="width:100%;padding:10px 12px;margin-bottom:10px;border:2px solid var(--border);border-radius:8px;font-size:15px;background:var(--surface);color:var(--fg)">
+      <input id="auth-pass" type="password" placeholder="密碼" autocomplete="current-password" style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:8px;font-size:15px;background:var(--surface);color:var(--fg)" onkeydown="if(event.key==='Enter')doSignIn()">
+      <div id="auth-err" style="color:var(--danger);font-size:12px;min-height:18px;margin:8px 0">${msg || ''}</div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="doSignIn()">登入</button>
+    </div>`;
+}
+window.doSignIn = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-pass').value;
+  const {error} = await sb.auth.signInWithPassword({email, password});
+  if (error) { document.getElementById('auth-err').textContent = '❌ 登入失敗：' + error.message; return; }
+  location.reload();
+};
+window.doSignOut = async function() { await sb.auth.signOut(); location.reload(); };
+
+// ─── Nav ──────────────────────────────────────────────────────────────────────
+let currentPage = 'dashboard';
+const PAGE_TITLES = {
+  dashboard: '總覽',
+  replies: '回覆狀況',
+  schedule: '排班管理',
+  'secretary-settings': '秘書設定',
+  email: 'Email 設定',
+  'doctor-reply': '填寫不值班日期',
+  staff: '人員設定',
+};
+
+function updateSidebarMonth() {
+  const {year, month} = state.currentMonth;
+  const el = document.getElementById('sidebar-month-label');
+  if (el) el.textContent = `${year}年${month}月`;
+}
+
+function shiftMonth(delta) {
+  let {year, month} = state.currentMonth;
+  month += delta;
+  if (month > 12) { month = 1; year++; }
+  if (month < 1)  { month = 12; year--; }
+  state.currentMonth = {year, month};
+  dbReplies = {};
+  saveState();
+  subscribeReplies(getMonthKey());
+  updateSidebarMonth();
+  renderPage(currentPage);
+}
+
+// ─── PIN protection (disabled) ────────────────────────────────────────────────
+function getPin() {
+  return state.secretarySettings?.pin || '';
+}
+
+function showPinDialog(onSuccess) {
+  const pin = getPin();
+  if (!pin) {
+    // No PIN set yet — prompt to set one
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'pin-dialog';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:360px">
+        <div class="modal-header">
+          <h3>🔐 設定秘書 PIN 碼</h3>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--fg2);margin-bottom:16px">尚未設定 PIN 碼。請設定一組 4～8 位數字，之後進入管理頁面需要輸入。</p>
+          <input id="pin-new" type="password" inputmode="numeric" placeholder="輸入 PIN 碼（4～8位數字）"
+            style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:18px;letter-spacing:4px;text-align:center;background:var(--surface);color:var(--fg)">
+          <input id="pin-confirm" type="password" inputmode="numeric" placeholder="再次確認 PIN 碼"
+            style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:18px;letter-spacing:4px;text-align:center;background:var(--surface);color:var(--fg);margin-top:10px">
+          <div id="pin-err" style="color:var(--danger);font-size:12px;margin-top:8px;min-height:16px"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;gap:10px">
+          <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('pin-dialog').remove()">取消</button>
+          <button class="btn btn-primary" style="flex:2" onclick="confirmSetPin()">設定並進入</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('pin-new').focus();
+    window._pinSuccessCb = onSuccess;
+    window.confirmSetPin = function() {
+      const v = document.getElementById('pin-new').value.trim();
+      const v2 = document.getElementById('pin-confirm').value.trim();
+      const err = document.getElementById('pin-err');
+      if (!/^\d{4,8}$/.test(v)) { err.textContent = '請輸入 4～8 位數字'; return; }
+      if (v !== v2) { err.textContent = '兩次輸入不一致'; return; }
+      if (!state.secretarySettings) state.secretarySettings = {};
+      state.secretarySettings.pin = v;
+      saveState();
+      _pinUnlocked = true;
+      document.getElementById('pin-dialog').remove();
+      showToast('✅ PIN 碼已設定');
+      if (window._pinSuccessCb) window._pinSuccessCb();
+    };
+    return;
+  }
+  // PIN already set — ask for it
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'pin-dialog';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:320px">
+      <div class="modal-header">
+        <h3>🔐 秘書驗證</h3>
+      </div>
+      <div class="modal-body" style="text-align:center">
+        <p style="font-size:13px;color:var(--fg2);margin-bottom:16px">請輸入秘書 PIN 碼</p>
+        <input id="pin-input" type="password" inputmode="numeric" placeholder="PIN 碼"
+          style="width:100%;padding:12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:22px;letter-spacing:6px;text-align:center;background:var(--surface);color:var(--fg)"
+          onkeydown="if(event.key==='Enter')verifyPin()">
+        <div id="pin-err" style="color:var(--danger);font-size:12px;margin-top:8px;min-height:16px"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:10px">
+        <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('pin-dialog').remove()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="verifyPin()">進入</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('pin-input').focus();
+  window._pinSuccessCb = onSuccess;
+  window.verifyPin = function() {
+    const v = document.getElementById('pin-input').value;
+    if (v === getPin()) {
+      _pinUnlocked = true;
+      document.getElementById('pin-dialog').remove();
+      if (window._pinSuccessCb) window._pinSuccessCb();
+    } else {
+      document.getElementById('pin-err').textContent = '❌ PIN 碼錯誤，請再試一次';
+      document.getElementById('pin-input').value = '';
+      document.getElementById('pin-input').focus();
+    }
+  };
+}
+
+function showPage(id) {
+  _doShowPage(id);
+}
+
+function _doShowPage(id) {
+  currentPage = id;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => {
+    if (el.getAttribute('onclick')?.includes(`'${id}'`)) el.classList.add('active');
+  });
+  document.querySelectorAll('[id^="page-"]').forEach(el => el.hidden = true);
+  const pageEl = document.getElementById(`page-${id}`);
+  if (pageEl) pageEl.hidden = false;
+  document.getElementById('page-title').textContent = PAGE_TITLES[id] || id;
+
+  const actionsEl = document.getElementById('topbar-actions');
+  actionsEl.innerHTML = '';
+
+  updateSidebarMonth();
+  renderPage(id);
+  closeSidebar();
+}
+
+function renderPage(id) {
+  if (id === 'dashboard') renderDashboard();
+  else if (id === 'replies') renderReplies();
+  else if (id === 'schedule') renderSchedule();
+  else if (id === 'secretary-settings') renderSecretarySettings();
+  else if (id === 'email') renderEmail();
+  else if (id === 'doctor-reply') renderDoctorReply();
+  else if (id === 'staff') renderStaff();
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const el = document.getElementById('page-dashboard');
+  const {year, month} = state.currentMonth;
+  const repliedCount = Object.keys(getReplies()).length;
+  const totalStaff = state.staff.length;
+  const pending = totalStaff - repliedCount;
+  const scheduleKey = `${year}-${month}`;
+  const hasSchedule = !!state.schedule[scheduleKey];
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = new Date();
+  const sendDate = new Date(year, month-2, 20); // 20th of previous month
+  const schedDate = new Date(year, month-2, 25);
+
+  document.getElementById('pending-badge').textContent = pending;
+
+  // 20日提醒：如果今天 >= 上個月20日 且本月通知尚未發送
+  const schedKey = `${year}-${month}`;
+  const prevMonth = month > 1 ? month-1 : 12;
+  const prevYear = month > 1 ? year : year-1;
+  const notify20 = new Date(prevYear, prevMonth-1, 20);
+  const alreadyNotified = !!state.notifyLog?.[schedKey];
+  const show20Alert = (today >= notify20) && !alreadyNotified;
+
+  el.innerHTML = `
+    ${show20Alert ? `
+    <div style="background:var(--warn-light);border:1.5px solid var(--warn);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:700;color:var(--warn);font-size:15px">📢 已到每月20日 — 請傳送填寫連結！</div>
+        <div style="font-size:13px;color:var(--fg2);margin-top:4px">請複製填寫連結，透過 LINE 發送給所有醫師填寫 ${year}年${month}月不值班日期。</div>
+      </div>
+      <button class="btn btn-primary" style="background:var(--warn);flex-shrink:0" onclick="copyFillLink(this)">
+        📋 複製填寫連結
+      </button>
+    </div>` : ''}
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">排班月份</div>
+        <div class="stat-value" style="font-size:22px">${year}年${month}月</div>
+        <div class="stat-sub">${daysInMonth}天</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">已回覆人數</div>
+        <div class="stat-value" style="color:var(--success)">${repliedCount}</div>
+        <div class="stat-sub">共 ${totalStaff} 人</div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${(repliedCount/totalStaff*100).toFixed(0)}%"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">未回覆人數</div>
+        <div class="stat-value" style="color:var(--danger)">${pending}</div>
+        <div class="stat-sub">截止日：${prevMonth}月25日</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">排班狀態</div>
+        <div class="stat-value" style="font-size:16px;margin-top:4px">
+          ${hasSchedule ? '<span class="chip chip-green">✓ 已完成</span>' : '<span class="chip chip-orange">待排班</span>'}
+        </div>
+        <div class="stat-sub">所有人回覆後由秘書排班</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <!-- Timeline -->
+      <div class="card">
+        <div class="card-header"><h2>📅 本月流程</h2></div>
+        <div class="card-body">
+          ${[
+            {date: `${month > 1 ? month-1 : 12}/20`, label: '透過 LINE 傳送填寫連結給醫師', done: today >= sendDate},
+            {date: `${month > 1 ? month-1 : 12}/25`, label: '截止回覆，秘書按下排班按鈕', done: today >= schedDate},
+            {date: `${month}/1`, label: `${year}年${month}月班表生效`, done: false},
+          ].map(t => `
+            <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px">
+              <div style="width:32px;height:32px;border-radius:50%;background:${t.done ? 'var(--success-light)' : 'var(--surface2)'};color:${t.done ? 'var(--success)' : 'var(--fg3)'};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${t.done ? '✓' : '○'}</div>
+              <div>
+                <div style="font-size:11px;color:var(--fg3);font-weight:600">${t.date}</div>
+                <div style="font-size:13px;font-weight:500">${t.label}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="card">
+        <div class="card-header"><h2>⚡ 快速操作</h2></div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn btn-primary" onclick="copyFillLink(this)" style="justify-content:center">
+            📋 複製 LINE 填寫連結
+          </button>
+          <button class="btn btn-secondary" onclick="copyLineMsg()" style="justify-content:center">
+            💬 複製完整 LINE 訊息
+          </button>
+          <button class="btn btn-secondary" onclick="runAutoSchedule()" style="justify-content:center">
+            🤖 執行自動排班
+          </button>
+          <button class="btn btn-secondary" onclick="showPage('replies')" style="justify-content:center">
+            👤 查看回覆狀況
+          </button>
+          <button class="btn btn-secondary" onclick="showPage('schedule')" style="justify-content:center">
+            📅 查看 / 微調班表
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reply summary -->
+    <div class="card">
+      <div class="card-header">
+        <h2>👤 醫師回覆摘要</h2>
+        <span style="font-size:12px;color:var(--fg3)">${repliedCount}/${totalStaff} 已回覆</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>姓名</th>
+            <th>回覆狀態</th>
+            <th>不值班天數</th>
+            <th>假日可值班</th>
+            <th>驗證</th>
+          </tr></thead>
+          <tbody>
+          ${state.staff.map(s => {
+            const r = getReplies()[s.id];
+            const {year, month} = state.currentMonth;
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const offDays = r?.offDays || [];
+            const availDays = daysInMonth - offDays.length;
+            const weekends = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+              const dow = new Date(year, month-1, d).getDay();
+              if (dow === 0 || dow === 6) weekends.push(d);
+            }
+            const availWeekends = weekends.filter(d => !offDays.includes(d));
+            const valid = r ? (availDays >= 10 && availWeekends.length >= 1) : null;
+            return `<tr>
+              <td><strong>${s.id}</strong></td>
+              <td>${r ? `<span class="chip chip-green">✓ 已回覆</span>` : `<span class="chip chip-orange">⏳ 未回覆</span>`}</td>
+              <td style="font-variant-numeric:tabular-nums">${r ? offDays.length : '—'}</td>
+              <td>${r ? (availWeekends.length > 0 ? `<span class="chip chip-green">${availWeekends.length}天</span>` : `<span class="chip chip-red">0天 ⚠️</span>`) : '—'}</td>
+              <td>${r ? (valid ? '<span class="chip chip-green">✓ 通過</span>' : '<span class="chip chip-red">⚠️ 不符</span>') : '—'}</td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Replies ──────────────────────────────────────────────────────────────────
+function renderReplies() {
+  const el = document.getElementById('page-replies');
+  const {year, month} = state.currentMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  el.innerHTML = `
+    <!-- 通知訊息卡 -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h2>📣 傳送填寫連結</h2>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:13px;color:var(--fg2)">
+          複製以下連結，透過 LINE 或其他通訊軟體傳給所有醫師。醫師開啟後可自行選擇姓名填寫。
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;font-family:var(--mono);word-break:break-all;color:var(--fg2)" id="fill-link-display"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="copy-line-btn" onclick="copyFillLink(this)">
+            📋 複製連結
+          </button>
+          <button class="btn btn-secondary" onclick="copyLineMsg()" id="copy-msg-btn">
+            💬 複製含說明的訊息
+          </button>
+        </div>
+        <div id="line-msg-preview" hidden style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;white-space:pre-wrap;line-height:1.7;color:var(--fg2);border:1px solid var(--border)"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>醫師回覆詳情</h2>
+        <button class="btn btn-sm btn-secondary" onclick="clearAllReplies()">清除所有回覆</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>姓名</th>
+            <th>狀態</th>
+            <th>不值班日期</th>
+            <th>期待值班</th>
+            <th>回覆時間</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody>
+          ${state.staff.map(s => {
+            const r = getReplies()[s.id];
+            const offDays = r?.offDays || [];
+            const pDays = r?.preferDays || [];
+            return `<tr>
+              <td><strong>${s.id}</strong></td>
+              <td>${r ? '<span class="chip chip-green">✓ 已回覆</span>' : '<span class="chip chip-orange">⏳ 未回覆</span>'}</td>
+              <td style="max-width:220px">
+                ${offDays.length ? offDays.map(d => {
+                  const dow = new Date(year, month-1, d).getDay();
+                  const isWeekend = dow === 0 || dow === 6;
+                  return `<span class="assign-pill" style="${isWeekend ? 'background:var(--warn-light);color:var(--warn)' : ''}">${month}/${d}(${DOW[dow]})</span>`;
+                }).join('') : '<span style="color:var(--fg3)">—</span>'}
+              </td>
+              <td style="max-width:160px">
+                ${pDays.length ? pDays.map(d => {
+                  const dow = new Date(year, month-1, d).getDay();
+                  return `<span class="assign-pill" style="background:var(--success-light);color:var(--success)">🌟${d}(${DOW[dow]})</span>`;
+                }).join('') : '<span style="color:var(--fg3)">—</span>'}
+              </td>
+              <td style="color:var(--fg3);font-size:12px">${r?.submittedAt ? new Date(r.submittedAt).toLocaleString('zh-TW') : '—'}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" onclick="editReply('${s.id}')">編輯</button>
+                ${r ? `<button class="btn btn-sm btn-danger" onclick="deleteReplyUI('${s.id}')" style="margin-left:4px">刪除</button>` : ''}
+              </td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  // Fill in the link display box
+  const linkEl = document.getElementById('fill-link-display');
+  if (linkEl) linkEl.textContent = getFillLink();
+}
+
+function getFillLink() {
+  const {year, month} = state.currentMonth;
+  const base = location.origin + location.pathname;
+  return `${base}#fill-${year}-${String(month).padStart(2,'0')}`;
+}
+
+window.copyFillLink = function(btn) {
+  const link = getFillLink();
+  navigator.clipboard.writeText(link).then(() => {
+    if (btn) { const orig = btn.textContent; btn.textContent = '✅ 已複製！'; setTimeout(() => { btn.textContent = orig; }, 2000); }
+    showToast('✅ 連結已複製，可直接貼到 LINE 傳送');
+  }).catch(() => {
+    const prev = document.getElementById('line-msg-preview');
+    if (prev) { prev.innerHTML = `<a href="${link}" target="_blank" style="color:var(--accent);word-break:break-all">${link}</a>`; prev.hidden = false; }
+    showToast('⚠️ 自動複製失敗，請點擊下方連結或手動複製');
+  });
+};
+
+window.copyLineMsg = function() {
+  const {year, month} = state.currentMonth;
+  const link = getFillLink();
+  const text = `【${year}年${month}月值班填寫通知】\n\n請點選以下連結，填寫本月無法值班的日期：\n${link}\n\n開啟後請選擇自己的姓名再填寫。\n\n填寫限制：\n・每月至少保留 10 天可值班\n・假日中至少 1 天可值班\n\n請於三日內完成填寫，謝謝！`;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-msg-btn');
+    if (btn) { btn.textContent = '✅ 已複製！'; setTimeout(() => { btn.textContent = '💬 複製含說明的訊息'; }, 2000); }
+    showToast('✅ 訊息已複製，可直接貼到 LINE 傳送');
+  }).catch(() => {
+    const prev = document.getElementById('line-msg-preview');
+    if (prev) {
+      const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const linked = escaped.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:var(--accent)">$1</a>');
+      prev.innerHTML = `<div style="white-space:pre-wrap">${linked}</div>`;
+      prev.hidden = false;
+    }
+    showToast('⚠️ 自動複製失敗，請點擊下方連結或手動複製');
+  });
+};
+
+function deleteReplyUI(name) {
+  deleteReply(name).then(() => {
+    renderPage('replies');
+    renderPage('dashboard');
+  });
+}
+
+function clearAllReplies() {
+  showConfirm('清除所有回覆', '確定要清除所有醫師的回覆嗎？此操作無法復原。', () => {
+    clearMonthReplies().then(() => {
+      renderPage('replies');
+      renderPage('dashboard');
+    });
+  });
+}
+
+function editReply(name) {
+  // Switch to doctor reply page pre-filled for this person
+  state._editingAs = name;
+  showPage('doctor-reply');
+}
+
+// ─── Doctor Reply ─────────────────────────────────────────────────────────────
+async function renderDoctorReply() {
+  const el = document.getElementById('page-doctor-reply');
+
+  // In fill mode (hash link), use the month from the URL, not the secretary's currentMonth
+  const {year, month} = state._fillMonthOverride || state.currentMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const editingAs = state._editingAs;
+
+  // urlMode: opened via #fill/YYYY/MM link (no editingAs), show name selector
+  const urlMode = !!state._fillMonthOverride && !editingAs;
+
+  const existingReply = editingAs ? (getReplies()[editingAs]?.offDays || []) : [];
+  const existingPrefer = editingAs ? (getReplies()[editingAs]?.preferDays || []) : [];
+  let selectedDays = new Set(existingReply);
+  let preferDays = new Set(existingPrefer);
+  let selectedName = editingAs || '';
+
+  // Count holidays for this month using isHoliday()
+  function getHolidayDays() {
+    const h = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      if (isHoliday(year, month, d)) h.push(d);
+    }
+    return h;
+  }
+
+  function calcStats() {
+    const offArr = [...selectedDays];
+    const availDays = daysInMonth - offArr.length;
+    const holidays = getHolidayDays();
+    const availHolidays = holidays.filter(d => !offArr.includes(d));
+    return {availDays, availHolidays, offArr, holidays};
+  }
+
+  function render() {
+    const {availDays, availHolidays, offArr, holidays} = calcStats();
+    const needsWarning = selectedName && (availDays < 10 || availHolidays.length < 1);
+    const canSubmit = !needsWarning;
+
+    el.innerHTML = `
+      ${urlMode ? '' : ''}
+      <div class="reply-header">
+        <h1>填寫不值班日期</h1>
+        <p>${year}年${month}月 值班意願回覆</p>
+      </div>
+      <div class="reply-body">
+
+        ${editingAs
+          ? `<div class="info-box" style="margin-bottom:20px">正在編輯：<strong>${editingAs}</strong> 的回覆</div>`
+          : `<div class="form-group">
+          <label class="form-label">請選擇您的姓名</label>
+          <select id="reply-name-sel" onchange="handleNameChange(this.value)" style="font-size:16px">
+            <option value="">── 請選擇 ──</option>
+            ${state.staff.map(s => `<option value="${s.id}" ${selectedName===s.id?'selected':''}>${s.id}</option>`).join('')}
+          </select>
+        </div>`}
+
+        <!-- 規則提醒 -->
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:20px;font-size:13px;line-height:1.9">
+          <div style="font-weight:700;margin-bottom:6px;color:var(--fg)">📌 填寫限制說明</div>
+          <div>• 每個月至少需有 <strong>10 天</strong>可排值班</div>
+          <div>• 假日（週六、日及國定假日）中至少需保留 <strong>1 天</strong>可排值班</div>
+          <div>• 本月共有 <strong>${holidays.length} 天</strong>假日</div>
+          <div style="color:var(--fg3);font-size:12px;margin-top:6px">紅色 = 無法值班（已選取）｜藍色 = 假日</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">請點選 <strong>無法值班</strong> 的日期（點選後變紅）</label>
+          <div id="day-picker" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px">
+            ${(() => {
+              // Header row: 日一二三四五六
+              const headers = ['日','一','二','三','四','五','六'].map(d =>
+                `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:4px 0">${d}</div>`
+              ).join('');
+              // Leading empty cells (first day of month's DOW)
+              const firstDow = new Date(year, month-1, 1).getDay(); // 0=Sun
+              const blanks = Array.from({length: firstDow}, () =>
+                `<div></div>`
+              ).join('');
+              // Day cells
+              const days = Array.from({length: daysInMonth}, (_, i) => {
+                const d = i + 1;
+                const dow = new Date(year, month-1, d).getDay();
+                const isHol = isHoliday(year, month, d);
+                const isSel = selectedDays.has(d);
+                const isWeekend = (dow === 0 || dow === 6);
+                let cls = 'day-btn';
+                if (isSel) cls += ' selected';
+                else if (isHol) cls += ' weekend';
+                return `<button class="${cls}" onclick="toggleDay(${d})"
+                  title="${month}/${d}(${DOW[dow]})${isHol?' 假日':''}"
+                  style="width:100%;aspect-ratio:1;padding:0;font-size:13px">
+                  ${d}
+                </button>`;
+              }).join('');
+              return headers + blanks + days;
+            })()}
+          </div>
+        </div>
+
+        <div class="info-box" id="avail-info" style="${needsWarning && selectedName ? 'display:none' : ''}">
+          可值班天數：<strong>${availDays}</strong> 天 ／ 假日可值：<strong>${availHolidays.length}</strong> 天
+          ${canSubmit && selectedName ? ' <span style="color:var(--success)">✓ 符合規定</span>' : ''}
+        </div>
+
+        ${needsWarning && selectedName ? `<div class="warning-box" style="display:block">
+          ⚠️ <strong>不符合填寫規定，無法送出！</strong><br>
+          目前可值班：<strong>${availDays}</strong> 天（需至少 10 天）<br>
+          假日可值：<strong>${availHolidays.length}</strong> 天（需至少 1 天）<br>
+          請減少勾選天數後再送出。
+        </div>` : ''}
+
+        <!-- 期待排班日期 -->
+        <div class="form-group" style="margin-top:20px">
+          <label class="form-label" style="display:flex;align-items:center;gap:6px">
+            <span>🌟 期待排班日期</span>
+            <span style="font-size:11px;font-weight:400;color:var(--fg3);background:var(--surface2);padding:2px 8px;border-radius:20px">選填</span>
+          </label>
+          <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">若有特別希望值班的日期，可以在此標記（綠色）。排班時會盡量滿足，但不保證一定安排。</div>
+          <div id="prefer-picker" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+            ${(() => {
+              const headers = ['日','一','二','三','四','五','六'].map(d =>
+                `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:4px 0">${d}</div>`
+              ).join('');
+              const firstDow = new Date(year, month-1, 1).getDay();
+              const blanks = Array.from({length: firstDow}, () => `<div></div>`).join('');
+              const days = Array.from({length: daysInMonth}, (_, i) => {
+                const d = i + 1;
+                const dow = new Date(year, month-1, d).getDay();
+                const isHol = isHoliday(year, month, d);
+                const isPref = preferDays.has(d);
+                const isOff = selectedDays.has(d);
+                let style = `width:100%;aspect-ratio:1;padding:0;font-size:13px;border-radius:6px;cursor:pointer;border:1.5px solid;transition:all .15s;`;
+                if (isOff) {
+                  style += `background:#f3f4f6;color:#ccc;border-color:#e5e7eb;cursor:not-allowed;`;
+                } else if (isPref) {
+                  style += `background:var(--success);color:#fff;border-color:var(--success);font-weight:600;`;
+                } else if (isHol) {
+                  style += `background:var(--accent-light);color:var(--accent);border-color:#bfdbfe;`;
+                } else {
+                  style += `background:var(--surface);color:var(--fg);border-color:var(--border);`;
+                }
+                return `<button style="${style}" ${isOff ? 'disabled' : `onclick="togglePrefer(${d})"`}
+                  title="${month}/${d}(${DOW[dow]})${isPref?' 期待值班':''}${isOff?' (已標為不值班)':''}">${d}</button>`;
+              }).join('');
+              return headers + blanks + days;
+            })()}
+          </div>
+          ${preferDays.size > 0 ? `<div style="font-size:12px;color:var(--success);margin-top:8px">✓ 已標記 ${preferDays.size} 天期待值班：${[...preferDays].sort((a,b)=>a-b).join('、')} 日</div>` : ''}
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button class="btn btn-secondary" onclick="clearReplyDays()" style="flex:1;justify-content:center">清除全部</button>
+          <button class="btn btn-primary" onclick="submitReply()" style="flex:2;justify-content:center;${needsWarning && selectedName ? 'opacity:.4;pointer-events:none' : ''}">
+            ${canSubmit && selectedName ? '✅ 確認送出' : '送出'}
+          </button>
+        </div>
+        <p style="font-size:11px;color:var(--fg3);text-align:center;margin-top:10px">送出後可重新填寫修改</p>
+      </div>
+    `;
+
+    window.handleNameChange = async function(v) {
+      selectedName = v;
+      if (urlMode && v) {
+        const mine = await fetchMyReply(v);
+        if (mine) dbReplies[v] = mine;
+      }
+      selectedDays = new Set(getReplies()[v]?.offDays || []);
+      preferDays = new Set(getReplies()[v]?.preferDays || []);
+      render();
+    };
+    window.toggleDay = function(d) {
+      if (selectedDays.has(d)) selectedDays.delete(d); else selectedDays.add(d);
+      // If a day is marked off, remove it from prefer too
+      if (selectedDays.has(d)) preferDays.delete(d);
+      render();
+    };
+    window.togglePrefer = function(d) {
+      if (preferDays.has(d)) preferDays.delete(d); else preferDays.add(d);
+      render();
+    };
+    window.clearReplyDays = function() { selectedDays = new Set(); preferDays = new Set(); render(); };
+  }
+
+  window.submitReply = async function() {
+    const name = selectedName || document.getElementById('reply-name-sel')?.value || editingAs;
+    if (!name) { showToast('⚠️ 請先選擇姓名'); return; }
+    const {availDays, availHolidays} = calcStats();
+    if (availDays < 10 || availHolidays.length < 1) {
+      showToast('⚠️ 不符合填寫限制，無法送出'); return;
+    }
+    try {
+      await saveReply(
+        name,
+        [...selectedDays].sort((a,b) => a-b),
+        [...preferDays].sort((a,b) => a-b)
+      );
+    } catch(e) {
+      showToast('⚠️ 儲存失敗，請重試');
+      console.error('submitReply error', e);
+      return;
+    }
+    state._editingAs = null;
+    // Show success in-page
+    const el2 = document.getElementById('page-doctor-reply');
+    el2.innerHTML = `
+      <div class="reply-header" style="background:var(--success)">
+        <h1>✅ 填寫完成</h1>
+        <p>您的不值班日期已送出，感謝配合！</p>
+      </div>
+      <div class="reply-body" style="text-align:center;padding-top:40px">
+        <div style="font-size:48px;margin-bottom:16px">🎉</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:8px">${name}，已成功送出</div>
+        <div style="font-size:13px;color:var(--fg3);margin-bottom:28px">如需修改，請點下方按鈕重新填寫。</div>
+        <button class="btn btn-secondary" onclick="window._reEditReply('${name}')"
+          style="font-size:14px;padding:12px 28px">
+          ✏️ 修改我的填寫
+        </button>
+      </div>`;
+    window._reEditReply = function(n) {
+      state._editingAs = n;
+      renderDoctorReply();
+    };
+    if (!urlMode) {
+      setTimeout(() => { renderPage('dashboard'); showPage('replies'); }, 1200);
+    }
+  };
+
+  render();
+}
+
+// ─── Secretary Settings ───────────────────────────────────────────────────────
+function renderSecretarySettings() {
+  const el = document.getElementById('page-secretary-settings');
+  const {year, month} = state.currentMonth;
+  const key = `${year}-${month}`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  if (!state.secretarySettings) state.secretarySettings = {traumaPreset:{},wardPreset:{},fixedAssign:{},holidays:{},extraWorkdays:{}};
+  const ss = state.secretarySettings;
+  const traumaPreset = ss.traumaPreset?.[key] || {};
+  const extraHolidays = ss.holidays?.[key] || [];
+  const extraWorkdays = ss.extraWorkdays?.[key] || [];
+  const wardPreset = ss.wardPreset?.[key] || [];  // array of day numbers
+
+  // Build trauma preset display
+  const traumaLines = Object.entries(traumaPreset).sort((a,b)=>a[0]-b[0])
+    .map(([d,n]) => `${d}:${n}`).join('\n');
+
+  // Ward calendar grid helper
+  function wardCalGrid() {
+    const firstDow = new Date(year, month-1, 1).getDay();
+    const headers = ['日','一','二','三','四','五','六'].map(h =>
+      `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:3px 0">${h}</div>`
+    ).join('');
+    const blanks = Array.from({length: firstDow}, () => `<div></div>`).join('');
+    const days = Array.from({length: daysInMonth}, (_, i) => {
+      const d = i + 1;
+      const dow = new Date(year, month-1, d).getDay();
+      const isHol = isHoliday(year, month, d);
+      const isSel = wardPreset.includes(d);
+      // Trauma days from preset (can't double-assign)
+      const isTrauma = !!traumaPreset[d];
+      let style = 'width:100%;aspect-ratio:1;padding:0;font-size:12px;border-radius:var(--radius-sm);border:1.5px solid var(--border);cursor:pointer;';
+      if (isTrauma) {
+        style += 'background:var(--warn-light);color:var(--warn);cursor:default;opacity:.6;';
+      } else if (isSel) {
+        style += 'background:var(--accent);color:#fff;border-color:var(--accent);';
+      } else if (isHol) {
+        style += 'background:var(--surface2);color:var(--fg3);';
+      } else {
+        style += 'background:var(--surface);color:var(--fg);';
+      }
+      return `<button style="${style}" ${isTrauma ? 'disabled title="已指定 Trauma"' : `onclick="toggleWardDay(${d})" title="${month}/${d}(${DOW[dow]})${isSel?' Ward班':''}"`}>
+        ${d}${isTrauma ? '<br><span style="font-size:8px">T</span>' : ''}
+      </button>`;
+    }).join('');
+    return `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${headers}${blanks}${days}</div>`;
+  }
+
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <!-- Ward 班預設 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🏥 Ward 班日期設定（${year}年${month}月）</h2>
+        </div>
+        <div class="card-body">
+          <div style="font-size:13px;color:var(--fg2);margin-bottom:12px">
+            點選要安排 Ward 班的日期（藍色），由系統排班時自動分配負責人員。<br>
+            <span style="font-size:12px;color:var(--fg3)">橘色標 T = 已指定為 Trauma 班（不可同日）</span>
+          </div>
+          <div style="max-width:360px">
+            ${wardCalGrid()}
+          </div>
+          <div style="margin-top:12px;font-size:13px">
+            已選 <strong>${wardPreset.length}</strong> 天 Ward 班：
+            ${wardPreset.length > 0
+              ? wardPreset.sort((a,b)=>a-b).map(d=>{const dow=new Date(year,month-1,d).getDay();return `<span class="chip chip-blue">${month}/${d}(${DOW[dow]})</span>`;}).join(' ')
+              : '<span style="color:var(--fg3)">（尚未選取）</span>'}
+          </div>
+        </div>
+      </div>
+
+      <!-- Trauma 預設 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🩺 Trauma 班預設（${year}年${month}月）</h2>
+        </div>
+        <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div class="form-label">Trauma 指定（格式：日期:姓名，每行一個）</div>
+            <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">可用人員：${TRAUMA_STAFF.join('、')}</div>
+            <textarea id="trauma-preset-input" rows="8" style="width:100%;font-size:13px;font-family:monospace;resize:vertical"
+              placeholder="例如：&#10;9:李宗霖&#10;22:陳勇璋&#10;23:王俊量">${traumaLines}</textarea>
+            <button class="btn btn-primary" onclick="saveTraumaPreset()" style="margin-top:10px">儲存 Trauma 預設</button>
+          </div>
+          <div>
+            <div class="form-label">目前預設</div>
+            <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;font-size:13px;min-height:120px">
+              ${Object.keys(traumaPreset).length === 0
+                ? '<span style="color:var(--fg3)">（尚未設定）</span>'
+                : Object.entries(traumaPreset).sort((a,b)=>+a[0]-+b[0]).map(([d,n]) => {
+                    const dow = new Date(year, month-1, +d).getDay();
+                    return `<div>${month}/${d}（${DOW[dow]}）→ <strong>${n}</strong></div>`;
+                  }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 假日設定 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>📅 假日設定（${year}年${month}月）</h2>
+        </div>
+        <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          ${(() => {
+            const firstDow = new Date(year, month-1, 1).getDay();
+            const calHeaders = ['日','一','二','三','四','五','六'].map(h =>
+              `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:3px 0">${h}</div>`
+            ).join('');
+            const blanks = Array.from({length: firstDow}, () => `<div></div>`).join('');
+
+            // Extra holidays calendar
+            const holDays = Array.from({length: daysInMonth}, (_, i) => {
+              const d = i + 1;
+              const dow = new Date(year, month-1, d).getDay();
+              const isBaseWeekend = (dow===0||dow===6);
+              const isSel = extraHolidays.includes(d);
+              if (isBaseWeekend) {
+                return `<div style="text-align:center;font-size:12px;padding:5px 0;border-radius:var(--radius-sm);background:var(--surface2);color:var(--fg3);opacity:.5">${d}</div>`;
+              }
+              return `<button onclick="toggleExtraHoliday(${d})"
+                title="${month}/${d}（${DOW[dow]}）${isSel?' 額外假日':''}"
+                style="width:100%;aspect-ratio:1;padding:0;font-size:12px;border-radius:var(--radius-sm);border:1.5px solid ${isSel?'var(--accent)':'var(--border)'};cursor:pointer;background:${isSel?'var(--accent)':'var(--surface)'};color:${isSel?'#fff':'var(--fg)'}">
+                ${d}
+              </button>`;
+            }).join('');
+
+            // Extra workdays calendar
+            const wkdDays = Array.from({length: daysInMonth}, (_, i) => {
+              const d = i + 1;
+              const dow = new Date(year, month-1, d).getDay();
+              const isBaseWeekend = (dow===0||dow===6);
+              const isSel = extraWorkdays.includes(d);
+              if (!isBaseWeekend) {
+                return `<div style="text-align:center;font-size:12px;padding:5px 0;border-radius:var(--radius-sm);background:var(--surface2);color:var(--fg3);opacity:.5">${d}</div>`;
+              }
+              return `<button onclick="toggleExtraWorkday(${d})"
+                title="${month}/${d}（${DOW[dow]}）補班"
+                style="width:100%;aspect-ratio:1;padding:0;font-size:12px;border-radius:var(--radius-sm);border:1.5px solid ${isSel?'var(--success)':'var(--warn)'};cursor:pointer;background:${isSel?'var(--success)':'var(--warn-light)'};color:${isSel?'#fff':'var(--warn)'}">
+                ${d}
+              </button>`;
+            }).join('');
+
+            return `
+            <!-- 國定假日/補假 -->
+            <div>
+              <div class="form-label">額外假日（國定假日、補假）</div>
+              <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">在原本的週六日以外，加入額外假日</div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:10px">
+                ${calHeaders}${blanks}${holDays}
+              </div>
+              <div style="font-size:12px;color:var(--fg3)">
+                已選：${extraHolidays.length > 0 ? extraHolidays.sort((a,b)=>a-b).map(d=>`${month}/${d}`).join('、') : '（無）'}
+              </div>
+            </div>
+            <!-- 補班日 -->
+            <div>
+              <div class="form-label">補班日（原本假日但需上班）</div>
+              <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">將週六日改為上班日</div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:10px">
+                ${calHeaders}${blanks}${wkdDays}
+              </div>
+              <div style="font-size:12px;color:var(--fg3)">
+                已選：${extraWorkdays.length > 0 ? extraWorkdays.sort((a,b)=>a-b).map(d=>`${month}/${d}`).join('、') : '（無）'}
+              </div>
+            </div>`;
+          })()}
+        </div>
+      </div>
+
+      <!-- 秘書指定排班 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>📌 指定排班（${year}年${month}月）</h2>
+        </div>
+        <div class="card-body">
+          <div style="font-size:13px;color:var(--fg2);margin-bottom:14px">
+            指定特定日期由特定人員排班。指定的班別計入當月總班數，系統會依此平均分配其餘班次。<br>
+            <span style="font-size:12px;color:var(--fg3)">注意：指定 ER 班時，若該天已為 Trauma/Ward 耦合日，指定會被忽略。</span>
+          </div>
+
+          <!-- Tabs for type selection -->
+          <div style="display:flex;gap:8px;margin-bottom:14px" id="fixed-assign-tabs">
+            ${['er','trauma','ward'].map((t,i) => {
+              const labels = {er:'🚨 ER',trauma:'🩺 Trauma',ward:'🏥 Ward'};
+              return `<button onclick="setFixedTab('${t}')" id="fixed-tab-${t}"
+                style="padding:6px 14px;border-radius:var(--radius-sm);border:1.5px solid var(--border);cursor:pointer;font-size:13px;font-weight:600;background:${i===0?'var(--accent)':'var(--surface)'};color:${i===0?'#fff':'var(--fg)'}">
+                ${labels[t]}
+              </button>`;
+            }).join('')}
+          </div>
+
+          ${(() => {
+            const fixedAll = ss.fixedAssign?.[key] || {};
+            const staffByType = {
+              er: state.staff.map(s => s.id),
+              trauma: TRAUMA_STAFF,
+              ward: WARD_STAFF,
+            };
+            return ['er','trauma','ward'].map((type, ti) => {
+              const fixedMap = fixedAll[type] || {};
+              const firstDow = new Date(year, month-1, 1).getDay();
+              const headers = ['日','一','二','三','四','五','六'].map(h =>
+                `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:3px 0">${h}</div>`
+              ).join('');
+              const blanks = Array.from({length: firstDow}, () => `<div></div>`).join('');
+              const days = Array.from({length: daysInMonth}, (_, i) => {
+                const d = i + 1;
+                const dow = new Date(year, month-1, d).getDay();
+                const assigned = fixedMap[d];
+                let bg = 'var(--surface)', color = 'var(--fg)', border = 'var(--border)';
+                if (assigned) { bg = 'var(--accent)'; color = '#fff'; border = 'var(--accent)'; }
+                return `<button onclick="clickFixedDay('${type}',${d})"
+                  title="${month}/${d}（${DOW[dow]}）${assigned?' → '+assigned:''}"
+                  style="width:100%;aspect-ratio:1;padding:0;font-size:11px;border-radius:var(--radius-sm);border:1.5px solid ${border};cursor:pointer;background:${bg};color:${color};line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
+                  <span>${d}</span>
+                  ${assigned ? `<span style="font-size:9px;overflow:hidden;max-width:100%;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">${assigned}</span>` : ''}
+                </button>`;
+              }).join('');
+              const summary = Object.entries(fixedMap).sort((a,b)=>+a[0]-+b[0])
+                .map(([d,n]) => `<span class="chip chip-blue">${month}/${d}→${n}</span>`).join(' ');
+              return `
+              <div id="fixed-panel-${type}" style="display:${ti===0?'block':'none'}">
+                <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start">
+                  <div>
+                    <div style="max-width:360px;margin-bottom:10px">
+                      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${headers}${blanks}${days}</div>
+                    </div>
+                    <div style="font-size:13px;min-height:30px">
+                      ${summary || '<span style="color:var(--fg3)">（尚未指定）</span>'}
+                    </div>
+                  </div>
+                  <div style="min-width:140px">
+                    <div class="form-label" style="margin-bottom:6px">選擇人員</div>
+                    <select id="fixed-person-${type}" style="width:100%;padding:6px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface);color:var(--fg);font-size:13px">
+                      ${staffByType[type].map(n => `<option value="${n}">${n}</option>`).join('')}
+                    </select>
+                    <div style="font-size:11px;color:var(--fg3);margin-top:6px">點選日期即指定右側人員；再點一次同一格取消指定</div>
+                    <button onclick="clearFixedType('${type}')" style="margin-top:10px;width:100%;padding:5px 0;border-radius:var(--radius-sm);border:1.5px solid var(--danger);background:transparent;color:var(--danger);cursor:pointer;font-size:12px">清除全部 ${type.toUpperCase()}</button>
+                  </div>
+                </div>
+              </div>`;
+            }).join('');
+          })()}
+        </div>
+      </div>
+
+      <!-- 本月假日預覽 -->
+      <div class="card">
+        <div class="card-header"><h2>📋 本月假日一覽</h2></div>
+        <div class="card-body">
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${Array.from({length: daysInMonth}, (_, i) => {
+              const d = i + 1;
+              const dow = new Date(year, month-1, d).getDay();
+              const hol = isHoliday(year, month, d);
+              return hol ? `<span class="chip chip-blue">${month}/${d}(${DOW[dow]})</span>` : '';
+            }).join('')}
+          </div>
+          <div style="font-size:12px;color:var(--fg3);margin-top:10px">
+            共 ${Array.from({length:daysInMonth},(_,i)=>i+1).filter(d=>isHoliday(year,month,d)).length} 天假日
+          </div>
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  window.toggleWardDay = function(d) {
+    if (!state.secretarySettings.wardPreset) state.secretarySettings.wardPreset = {};
+    if (!state.secretarySettings.wardPreset[key]) state.secretarySettings.wardPreset[key] = [];
+    const arr = state.secretarySettings.wardPreset[key];
+    const idx = arr.indexOf(d);
+    if (idx >= 0) arr.splice(idx, 1); else arr.push(d);
+    saveState();
+    renderSecretarySettings();
+  };
+
+  window.saveTraumaPreset = function() {
+    const raw = document.getElementById('trauma-preset-input').value.trim();
+    const preset = {};
+    for (const line of raw.split('\n')) {
+      const t = line.trim(); if (!t) continue;
+      const [d,n] = t.split(':');
+      const day = parseInt(d);
+      const name = n?.trim();
+      if (!day || !name || !TRAUMA_STAFF.includes(name)) {
+        showToast(`⚠️ 格式錯誤：「${t}」`); return;
+      }
+      preset[day] = name;
+    }
+    if (!state.secretarySettings.traumaPreset) state.secretarySettings.traumaPreset = {};
+    state.secretarySettings.traumaPreset[key] = preset;
+    saveState();
+    showToast('✅ Trauma 預設已儲存');
+    renderSecretarySettings();
+  };
+
+  window.toggleExtraHoliday = function(d) {
+    if (!state.secretarySettings.holidays) state.secretarySettings.holidays = {};
+    if (!state.secretarySettings.holidays[key]) state.secretarySettings.holidays[key] = [];
+    const arr = state.secretarySettings.holidays[key];
+    const idx = arr.indexOf(d);
+    if (idx >= 0) arr.splice(idx, 1); else arr.push(d);
+    saveState();
+    renderSecretarySettings();
+  };
+
+  window.toggleExtraWorkday = function(d) {
+    if (!state.secretarySettings.extraWorkdays) state.secretarySettings.extraWorkdays = {};
+    if (!state.secretarySettings.extraWorkdays[key]) state.secretarySettings.extraWorkdays[key] = [];
+    const arr = state.secretarySettings.extraWorkdays[key];
+    const idx = arr.indexOf(d);
+    if (idx >= 0) arr.splice(idx, 1); else arr.push(d);
+    saveState();
+    renderSecretarySettings();
+  };
+
+  // ── Fixed assign handlers ──
+  window.setFixedTab = function(type) {
+    ['er','trauma','ward'].forEach(t => {
+      const tab = document.getElementById('fixed-tab-'+t);
+      const panel = document.getElementById('fixed-panel-'+t);
+      if (tab) { tab.style.background = t===type ? 'var(--accent)' : 'var(--surface)'; tab.style.color = t===type ? '#fff' : 'var(--fg)'; }
+      if (panel) panel.style.display = t===type ? 'block' : 'none';
+    });
+  };
+
+  window.clickFixedDay = function(type, d) {
+    if (!state.secretarySettings.fixedAssign) state.secretarySettings.fixedAssign = {};
+    if (!state.secretarySettings.fixedAssign[key]) state.secretarySettings.fixedAssign[key] = {};
+    if (!state.secretarySettings.fixedAssign[key][type]) state.secretarySettings.fixedAssign[key][type] = {};
+    const map = state.secretarySettings.fixedAssign[key][type];
+    if (map[d]) {
+      // Toggle off if same day clicked again
+      delete map[d];
+    } else {
+      const sel = document.getElementById('fixed-person-'+type);
+      const name = sel ? sel.value : null;
+      if (!name) return;
+      map[d] = name;
+    }
+    saveState();
+    renderSecretarySettings();
+  };
+
+  window.clearFixedType = function(type) {
+    if (!state.secretarySettings.fixedAssign?.[key]) return;
+    state.secretarySettings.fixedAssign[key][type] = {};
+    saveState();
+    renderSecretarySettings();
+  };
+}
+
+window.changePinFlow = function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'change-pin-dialog';
+  const hasPin = !!getPin();
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header"><h3>🔑 ${hasPin ? '修改' : '設定'} PIN 碼</h3></div>
+      <div class="modal-body">
+        ${hasPin ? `<input id="pin-old" type="password" inputmode="numeric" placeholder="輸入目前 PIN 碼"
+          style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:18px;letter-spacing:4px;text-align:center;background:var(--surface);color:var(--fg);margin-bottom:10px">` : ''}
+        <input id="pin-new2" type="password" inputmode="numeric" placeholder="新 PIN 碼（4～8位數字）"
+          style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:18px;letter-spacing:4px;text-align:center;background:var(--surface);color:var(--fg)">
+        <input id="pin-confirm2" type="password" inputmode="numeric" placeholder="確認新 PIN 碼"
+          style="width:100%;padding:10px 12px;border:2px solid var(--border);border-radius:var(--radius-sm);font-size:18px;letter-spacing:4px;text-align:center;background:var(--surface);color:var(--fg);margin-top:10px">
+        <div id="cpin-err" style="color:var(--danger);font-size:12px;margin-top:8px;min-height:16px"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:10px">
+        <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('change-pin-dialog').remove()">取消</button>
+        <button class="btn btn-primary" style="flex:2" onclick="doChangePin()">儲存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  (document.getElementById('pin-old') || document.getElementById('pin-new2')).focus();
+  window.doChangePin = function() {
+    const err = document.getElementById('cpin-err');
+    if (hasPin) {
+      const old = document.getElementById('pin-old').value;
+      if (old !== getPin()) { err.textContent = '目前 PIN 碼錯誤'; return; }
+    }
+    const nv = document.getElementById('pin-new2').value.trim();
+    const cv = document.getElementById('pin-confirm2').value.trim();
+    if (!/^\d{4,8}$/.test(nv)) { err.textContent = '請輸入 4～8 位數字'; return; }
+    if (nv !== cv) { err.textContent = '兩次輸入不一致'; return; }
+    state.secretarySettings.pin = nv;
+    saveState();
+    document.getElementById('change-pin-dialog').remove();
+    showToast('✅ PIN 碼已更新');
+    renderSecretarySettings();
+  };
+};
+
+// ─── Send 20-day notify emails ─────────────────────────────────────────────────
+function sendNotifyEmails() {
+  // Legacy: replaced by copyFillLink / copyLineMsg
+  copyFillLink(null);
+}
+
+// ─── Schedule ─────────────────────────────────────────────────────────────────
+function getScheduleKey() {
+  const {year, month} = state.currentMonth;
+  return `${year}-${month}`;
+}
+
+function renderSchedule() {
+  const el = document.getElementById('page-schedule');
+  const {year, month} = state.currentMonth;
+  const key = getScheduleKey();
+  const sched = state.schedule[key] || {};
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  document.getElementById('topbar-actions').innerHTML = `
+    <button class="btn btn-primary" onclick="runAutoSchedule()">🤖 自動排班</button>
+  `;
+
+  // Build schedule grid
+  const days = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(year, month-1, d).getDay();
+    days.push({d, dow, isWeekend: dow === 0 || dow === 6});
+  }
+
+  // Count shifts per person per type
+  const erCount = {}, wardCount = {}, traumaCount = {};
+  state.staff.forEach(s => { erCount[s.id] = 0; wardCount[s.id] = 0; traumaCount[s.id] = 0; });
+  Object.values(sched).forEach(dayShifts => {
+    if (dayShifts['ER'] && erCount[dayShifts['ER']] !== undefined) erCount[dayShifts['ER']]++;
+    if (dayShifts['Ward'] && wardCount[dayShifts['Ward']] !== undefined) wardCount[dayShifts['Ward']]++;
+    if (dayShifts['Trauma'] && traumaCount[dayShifts['Trauma']] !== undefined) traumaCount[dayShifts['Trauma']]++;
+  });
+  const shiftCount = {};
+  state.staff.forEach(s => { shiftCount[s.id] = erCount[s.id] + wardCount[s.id] + traumaCount[s.id]; });
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:700">${year}年${month}月班表</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${SHIFTS.map(s => `<span class="chip ${SHIFT_CLASS[s] ? 'slot '+SHIFT_CLASS[s] : 'chip-gray'}" style="border-radius:4px">${s}</span>`).join('')}
+      </div>
+    </div>
+
+    <!-- Shift count -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>班數統計（本月）</h2></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--fg3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">
+            ER 班（10人，共${Object.values(erCount).reduce((a,b)=>a+b,0)}天）
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            ${state.staff.map(s => {
+              const c = erCount[s.id] || 0;
+              const color = c < 3 ? 'var(--warn)' : c > 3 ? 'var(--danger)' : 'var(--success)';
+              return `<div style="text-align:center;min-width:48px">
+                <div class="slot er" style="font-weight:700;font-size:16px;border-radius:6px;padding:4px 8px;display:inline-block">${c}</div>
+                <div style="font-size:11px;color:var(--fg2);margin-top:2px">${s.id}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--fg3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">
+            Ward 班（7人，共${Object.values(wardCount).reduce((a,b)=>a+b,0)}天）
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            ${WARD_STAFF.map(name => {
+              const c = wardCount[name] || 0;
+              return `<div style="text-align:center;min-width:48px">
+                <div class="slot ward" style="font-weight:700;font-size:16px;border-radius:6px;padding:4px 8px;display:inline-block">${c}</div>
+                <div style="font-size:11px;color:var(--fg2);margin-top:2px">${name}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--fg3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">
+            Trauma 班（3人，共${Object.values(traumaCount).reduce((a,b)=>a+b,0)}天）
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            ${TRAUMA_STAFF.map(name => {
+              const c = traumaCount[name] || 0;
+              return `<div style="text-align:center;min-width:48px">
+                <div class="slot trauma" style="font-weight:700;font-size:16px;border-radius:6px;padding:4px 8px;display:inline-block">${c}</div>
+                <div style="font-size:11px;color:var(--fg2);margin-top:2px">${name}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule grid -->
+    <div class="card">
+      <div class="cal-outer">
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th style="min-width:60px">日期</th>
+              <th>星期</th>
+              ${SHIFTS.map(s => `<th>${s}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${days.map(({d, dow, isWeekend}) => {
+              const dayKey = `${d}`;
+              const dayShifts = sched[dayKey] || {};
+              const offPeople = new Set(
+                state.staff.filter(s => (getReplies()[s.id]?.offDays || []).includes(d)).map(s => s.id)
+              );
+              const rowBg = isWeekend ? 'background:var(--accent-light)' : '';
+              return `<tr style="${rowBg}">
+                <td style="font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap">${month}/${d}</td>
+                <td style="text-align:center;font-weight:600;color:${isWeekend ? 'var(--accent)' : 'var(--fg2)'}">${DOW[dow]}</td>
+                ${SHIFTS.map(shift => {
+                  const assigned = dayShifts[shift] || '';
+                  const isOff = assigned && offPeople.has(assigned);
+                  return `<td>
+                    ${assigned ? `<div class="slot ${SHIFT_CLASS[shift]||''}" onclick="openSlotEdit(${d},'${shift}')" title="點擊更改">
+                      <span>${assigned}</span>
+                      <button class="remove-btn" onclick="event.stopPropagation();removeSlot(${d},'${shift}')">✕</button>
+                    </div>` :
+                    `<button class="add-slot-btn" onclick="openSlotEdit(${d},'${shift}')">+</button>`}
+                  </td>`;
+                }).join('')}
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function removeSlot(day, shift) {
+  const key = getScheduleKey();
+  if (!state.schedule[key]) return;
+  if (state.schedule[key][day]) {
+    delete state.schedule[key][day][shift];
+  }
+  saveState();
+  renderSchedule();
+}
+
+let _slotEdit = null;
+
+function openSlotEdit(day, shift) {
+  const {year, month} = state.currentMonth;
+  const key = getScheduleKey();
+  const sched = state.schedule[key] || {};
+  const current = sched[day]?.[shift] || '';
+
+  // Who's available this day
+  const offPeople = new Set(
+    state.staff.filter(s => (getReplies()[s.id]?.offDays || []).includes(day)).map(s => s.id)
+  );
+  // Who's already assigned today
+  const assignedToday = new Set(Object.values(sched[day] || {}));
+
+  _slotEdit = {day, shift};
+  document.getElementById('slot-modal-title').textContent = `${month}/${day} — ${shift}`;
+  document.getElementById('slot-modal-body').innerHTML = `
+    <p style="font-size:13px;color:var(--fg2);margin-bottom:12px">選擇值班醫師：</p>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="radio" name="slot-person" value="" ${!current ? 'checked' : ''}> <span style="color:var(--fg3)">（空班）</span>
+      </label>
+      ${state.staff.map(s => {
+        const isOff = offPeople.has(s.id);
+        const isAssigned = assignedToday.has(s.id) && s.id !== current;
+        return `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;opacity:${isOff ? 0.4 : 1}">
+          <input type="radio" name="slot-person" value="${s.id}" ${s.id === current ? 'checked' : ''} ${isOff ? 'disabled' : ''}>
+          <span>${s.id}</span>
+          ${isOff ? '<span class="chip chip-red" style="font-size:10px">不值</span>' : ''}
+          ${isAssigned ? '<span class="chip chip-orange" style="font-size:10px">已排他班</span>' : ''}
+        </label>`;
+      }).join('')}
+    </div>
+  `;
+  document.getElementById('slot-modal').hidden = false;
+}
+
+function confirmSlotEdit() {
+  if (!_slotEdit) return;
+  const {day, shift} = _slotEdit;
+  const key = getScheduleKey();
+  const val = document.querySelector('input[name="slot-person"]:checked')?.value || '';
+  if (!state.schedule[key]) state.schedule[key] = {};
+  if (!state.schedule[key][day]) state.schedule[key][day] = {};
+  if (val) state.schedule[key][day][shift] = val;
+  else delete state.schedule[key][day][shift];
+  saveState();
+  closeModal('slot-modal');
+  renderSchedule();
+}
+
+// ─── Auto Schedule ────────────────────────────────────────────────────────────
+// 三級排班算法：
+//   1. Trauma 先指定（需用戶輸入 traumaDays/traumaPersons）
+//   2. Ward 在非 Trauma 日中選出並指派（7人平衡）
+//   3. ER = Trauma日同一人, Ward日同一人, 其餘日從10人平衡分配
+function runAutoSchedule() {
+  const {year, month} = state.currentMonth;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const key = getScheduleKey();
+
+  // Show input dialog for Trauma days
+  showAutoScheduleDialog(year, month, daysInMonth, key);
+}
+
+function showAutoScheduleDialog(year, month, daysInMonth, key) {
+  // Pre-fill trauma from secretary settings
+  const traumaPreset = state.secretarySettings?.traumaPreset?.[key] || {};
+  const traumaPrefill = Object.entries(traumaPreset).sort((a,b)=>+a[0]-+b[0])
+    .map(([d,n])=>`${d}:${n}`).join('\n');
+  // Pre-fill ward days from secretary settings
+  const wardPreset = state.secretarySettings?.wardPreset?.[key] || [];
+  const wardPrefillCount = wardPreset.length || 12;
+
+  // Check all-unavailable days before showing dialog
+  const allUnavailDays = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const availCount = state.staff.filter(s => !(getReplies()[s.id]?.offDays||[]).includes(d)).length;
+    if (availCount === 0) allUnavailDays.push(d);
+  }
+  const warnHTML = allUnavailDays.length > 0 ? `
+    <div style="background:var(--danger-light);border:1.5px solid var(--danger);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;color:var(--danger)">
+      ⚠️ <strong>警告：以下日期所有人員均無法值班！</strong><br>
+      <span style="font-size:12px">${allUnavailDays.map(d=>{const dw=new Date(year,month-1,d).getDay();return `${month}/${d}(${DOW[dw]})`;}).join('、')}</span><br>
+      <span style="font-size:12px">排班後這些天將出現空班，建議先請相關人員修改填寫。</span>
+    </div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:560px;width:90vw">
+      <div class="modal-header">
+        <h3>⚡ 自動排班 - ${year}年${month}月</h3>
+        <button style="background:none;border:none;cursor:pointer;color:var(--fg3);font-size:20px" onclick="this.closest('.modal-overlay').remove()">×</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
+        ${warnHTML}
+        <div class="info-box" style="font-size:13px">
+          <strong>排班規則：</strong><br>
+          • Trauma 班由 <strong>${TRAUMA_STAFF.join('、')}</strong> 負責<br>
+          • Ward 班由 <strong>${WARD_STAFF.join('、')}</strong> 平均分擔<br>
+          • ER 班每天一人（10人平衡），Trauma/Ward 日 ER 由同人承擔
+        </div>
+
+        <div>
+          <div class="form-label">Ward 班天數</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="number" id="ward-days-count" value="${wardPrefillCount}" min="1" max="${daysInMonth}" style="width:80px">
+            ${wardPreset.length > 0 ? `<span style="font-size:12px;color:var(--success)">✓ 已從秘書設定預填（${wardPreset.length} 天）</span>` : '<span style="font-size:12px;color:var(--fg3)">（預設12天）</span>'}
+          </div>
+        </div>
+
+        <div>
+          <div class="form-label">Trauma 班指定（格式：日期:人名，每行一個）</div>
+          <div style="font-size:12px;color:var(--fg3);margin-bottom:6px">
+            可用人員：${TRAUMA_STAFF.join('、')}
+            ${traumaPrefill ? ' <span style="color:var(--success)">✓ 已從秘書設定預填</span>' : ''}
+          </div>
+          <textarea id="trauma-input" rows="7" style="width:100%;font-size:13px;font-family:monospace"
+            placeholder="例如：&#10;9:李宗霖&#10;22:陳勇璋&#10;23:王俊量">${traumaPrefill}</textarea>
+        </div>
+
+        <div>
+          <div class="form-label">Ward 班指定（選填，格式：日期，每行一個）</div>
+          <div style="font-size:12px;color:var(--fg3);margin-bottom:6px">
+            ${wardPreset.length > 0 ? '已從秘書設定預填日期，系統將自動分配負責人員' : '留空則由系統自動從不值班登記中分配'}
+          </div>
+          <textarea id="ward-input" rows="5" style="width:100%;font-size:13px;font-family:monospace"
+            placeholder="例如（只填日期）：&#10;1&#10;3&#10;8&#10;11&#10;...">${wardPreset.length > 0 ? wardPreset.sort((a,b)=>a-b).join('\n') : ''}</textarea>
+        </div>
+
+        <div id="schedule-error" style="color:#ef4444;font-size:13px;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="executeAutoSchedule(${year},${month},${daysInMonth},'${key}')">
+          ⚡ 開始排班
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function executeAutoSchedule(year, month, daysInMonth, key) {
+  const traumaRaw = document.getElementById('trauma-input').value.trim();
+  const wardRaw   = document.getElementById('ward-input').value.trim();
+  const wardDaysCount = parseInt(document.getElementById('ward-days-count').value) || 12;
+  const errEl = document.getElementById('schedule-error');
+  errEl.style.display = 'none';
+
+  // Parse trauma
+  const traumaSched = {}; // {day: name}
+  if (traumaRaw) {
+    for (const line of traumaRaw.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const [d, n] = t.split(':');
+      const day = parseInt(d);
+      const name = n?.trim();
+      if (!day || !name || !TRAUMA_STAFF.includes(name)) {
+        errEl.textContent = `Trauma 格式錯誤或人員不符：「${t}」（只能是 ${TRAUMA_STAFF.join('、')}）`;
+        errEl.style.display = '';
+        return;
+      }
+      traumaSched[day] = name;
+    }
+  }
+
+  // Parse ward (optional) — format: just day numbers (name auto-assigned) or day:name
+  // wardDaysList: days to assign ward (name=null means auto-assign)
+  const wardDaysList = []; // [{day, name}] name may be null
+  if (wardRaw) {
+    for (const line of wardRaw.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      if (t.includes(':')) {
+        // Legacy format day:name
+        const [d, n] = t.split(':');
+        const day = parseInt(d);
+        const name = n?.trim();
+        if (!day || !name || !WARD_STAFF.includes(name)) {
+          errEl.textContent = `Ward 格式錯誤或人員不符：「${t}」`;
+          errEl.style.display = ''; return;
+        }
+        if (traumaSched[day]) {
+          errEl.textContent = `第 ${day} 天已有 Trauma 班，不能同天安排 Ward`;
+          errEl.style.display = ''; return;
+        }
+        wardDaysList.push({day, name});
+      } else {
+        // New format: just day number, name auto-assigned
+        const day = parseInt(t);
+        if (!day || day < 1 || day > daysInMonth) {
+          errEl.textContent = `Ward 日期格式錯誤：「${t}」`;
+          errEl.style.display = ''; return;
+        }
+        if (traumaSched[day]) {
+          errEl.textContent = `第 ${day} 天已有 Trauma 班，不能同天安排 Ward`;
+          errEl.style.display = ''; return;
+        }
+        wardDaysList.push({day, name: null});
+      }
+    }
+  }
+  // Merge fixedAssign.ward into wardDaysList before building wardSchedInput
+  const fixedWard = (state.secretarySettings?.fixedAssign?.[key]?.ward) || {};
+  Object.entries(fixedWard).forEach(([ds, name]) => {
+    const d = parseInt(ds);
+    if (!traumaSched[d] && !wardDaysList.find(x=>x.day===d)) {
+      if (WARD_STAFF.includes(name)) wardDaysList.push({day: d, name});
+    }
+  });
+
+  // Build wardSchedInput from pre-specified names; days with name=null are added later
+  const wardSchedInput = {};
+  wardDaysList.filter(x=>x.name).forEach(x => { wardSchedInput[x.day] = x.name; });
+  // Days that need auto-assignment
+  const wardAutoAssignDays = wardDaysList.filter(x=>!x.name).map(x=>x.day);
+
+  // Merge fixedAssign.trauma into traumaSched (secretary fixed trauma assignments)
+  const fixedTrauma = (state.secretarySettings?.fixedAssign?.[key]?.trauma) || {};
+  Object.entries(fixedTrauma).forEach(([ds, name]) => {
+    const d = parseInt(ds);
+    if (!traumaSched[d] && TRAUMA_STAFF.includes(name)) traumaSched[d] = name;
+  });
+
+  // ── Step 1: Trauma days fixed ──
+  const traumaDays = Object.keys(traumaSched).map(Number).sort((a,b)=>a-b);
+
+  // ── Step 2: Ward days ──
+  const isWeekend = d => { const dow = new Date(year, month-1, d).getDay(); return dow===0||dow===6; };
+  let wardSched = {...wardSchedInput};
+
+  // wardAutoAssignDays: days from secretary preset without assigned names → need auto-assign
+  // specifiedWardDays: days already in wardSched (name provided)
+  const specifiedWardDays = Object.keys(wardSched).map(Number);
+  // If wardAutoAssignDays has days, those also count toward the total
+  const totalPresetDays = specifiedWardDays.length + wardAutoAssignDays.length;
+  const effectiveWardCount = totalPresetDays > 0 ? totalPresetDays : wardDaysCount;
+  const remainWardCount = effectiveWardCount - specifiedWardDays.length;
+
+  if (remainWardCount > 0) {
+    // Off-day sets and prefer-day sets per person
+    const offMap = {};
+    const preferMapW = {};
+    state.staff.forEach(s => {
+      offMap[s.id] = new Set(getReplies()[s.id]?.offDays || []);
+      preferMapW[s.id] = new Set(getReplies()[s.id]?.preferDays || []);
+    });
+
+    // Count ward shifts per person so far
+    const wardCount = {};
+    WARD_STAFF.forEach(n => { wardCount[n] = 0; });
+    specifiedWardDays.forEach(d => { if (wardSched[d]) wardCount[wardSched[d]]++; });
+
+    // Build candidate days:
+    // If wardAutoAssignDays has specific days (from secretary preset), use those;
+    // otherwise pick from all days not trauma/ward-assigned
+    let candidateDays = [];
+    if (wardAutoAssignDays.length > 0) {
+      candidateDays = wardAutoAssignDays.filter(d => !traumaSched[d] && !wardSched[d]).sort((a,b)=>a-b);
+    } else {
+      for (let d = 1; d <= daysInMonth; d++) {
+        if (traumaSched[d]) continue;
+        if (wardSched[d]) continue;
+        candidateDays.push(d);
+      }
+    }
+
+    // Greedily assign ward days, picking person with fewest wards
+    for (let i = 0; i < Math.min(remainWardCount, candidateDays.length); i++) {
+      const d = candidateDays[i];
+      // Find available ward staff (not off, not consecutive with own assignments)
+      const assignedDaysOfPerson = {};
+      WARD_STAFF.forEach(n => { assignedDaysOfPerson[n] = []; });
+      Object.entries(wardSched).forEach(([day, name]) => { assignedDaysOfPerson[name]?.push(parseInt(day)); });
+
+      const available = WARD_STAFF.filter(n => {
+        if (offMap[n].has(d)) return false;
+        // Consecutive check per person
+        const myDays = assignedDaysOfPerson[n];
+        if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
+        return true;
+      }).sort((a,b) => {
+        // Prefer bonus
+        const aPref = (preferMapW[a]?.has(d)) ? -1 : 0;
+        const bPref = (preferMapW[b]?.has(d)) ? -1 : 0;
+        if (aPref !== bPref) return aPref - bPref;
+        return wardCount[a] - wardCount[b];
+      });
+
+      if (available.length > 0) {
+        wardSched[d] = available[0];
+        wardCount[available[0]]++;
+        assignedDaysOfPerson[available[0]].push(d);
+      }
+    }
+  }
+
+  const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
+
+  // ── Step 3: ER assignment ──
+  // Coupled days (Trauma / Ward carry their person into ER)
+  const erSched = {};
+  traumaDays.forEach(d => { erSched[d] = traumaSched[d]; });
+  wardDays.forEach(d => { erSched[d] = wardSched[d]; });
+
+  // Apply secretary fixed assignments (override free days, skip already-coupled)
+  const fixedER = (state.secretarySettings?.fixedAssign?.[key]?.er) || {};
+  Object.entries(fixedER).forEach(([ds, name]) => {
+    const d = parseInt(ds);
+    if (!erSched[d]) {  // only assign if not already taken by trauma/ward coupling
+      const person = state.staff.find(s => s.id === name);
+      if (person) erSched[d] = name;
+    }
+  });
+
+  // Free ER days (no trauma, no ward, no fixed)
+  const freeDays = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (!erSched[d]) freeDays.push(d);
+  }
+
+  // Balance free ER across all 10 staff
+  const erCount = {}; // total ER per person
+  const erWkndCount = {};
+  state.staff.forEach(s => { erCount[s.id] = 0; erWkndCount[s.id] = 0; });
+  // Count coupled + fixed ER (they all count toward the person's total)
+  Object.entries(erSched).forEach(([d, n]) => {
+    if (erCount[n] !== undefined) {
+      erCount[n]++;
+      if (isWeekend(parseInt(d))) erWkndCount[n]++;
+    }
+  });
+
+  // Track each person's ER days for consecutive check
+  const erDaysOfPerson = {};
+  state.staff.forEach(s => { erDaysOfPerson[s.id] = []; });
+  Object.entries(erSched).forEach(([d, n]) => { erDaysOfPerson[n].push(parseInt(d)); });
+
+  const offMap2 = {};
+  const preferMap = {}; // preferDays per person
+  state.staff.forEach(s => {
+    offMap2[s.id] = new Set(getReplies()[s.id]?.offDays || []);
+    preferMap[s.id] = new Set(getReplies()[s.id]?.preferDays || []);
+  });
+
+  for (const d of freeDays) {
+    const wknd = isWeekend(d);
+    const available = state.staff.filter(s => {
+      if (offMap2[s.id].has(d)) return false;
+      const myDays = erDaysOfPerson[s.id];
+      if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
+      return true;
+    }).sort((a, b) => {
+      // Sort by: prefer bonus first (prefers this day → rank higher)
+      const aPref = preferMap[a.id].has(d) ? -1 : 0;
+      const bPref = preferMap[b.id].has(d) ? -1 : 0;
+      if (aPref !== bPref) return aPref - bPref;
+      // Then by total ER count, then weekend ER count
+      if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
+      if (wknd) return erWkndCount[a.id] - erWkndCount[b.id];
+      return 0;
+    });
+
+    if (available.length > 0) {
+      const chosen = available[0];
+      erSched[d] = chosen.id;
+      erCount[chosen.id]++;
+      if (wknd) erWkndCount[chosen.id]++;
+      erDaysOfPerson[chosen.id].push(d);
+    }
+  }
+
+  // ── Build final schedule object ──
+  const sched = {};
+  for (let d = 1; d <= daysInMonth; d++) {
+    sched[d] = {};
+    if (traumaSched[d]) sched[d]['Trauma'] = traumaSched[d];
+    if (wardSched[d])   sched[d]['Ward']   = wardSched[d];
+    if (erSched[d])     sched[d]['ER']     = erSched[d];
+  }
+
+  state.schedule[key] = sched;
+  state.autoScheduled = true;
+  saveState();
+
+  // Close dialog
+  document.querySelector('.modal-overlay')?.remove();
+  showPage('schedule');
+
+  // ── Check for unassigned days ──────────────────────────────────────────────
+  const emptyER = [];
+  const emptyWard = [];
+  const emptyTrauma = [];
+  const wardDaysExpected = (state.secretarySettings?.wardPreset?.[key] || []);
+  const traumaDaysExpected = Object.keys(state.secretarySettings?.traumaPreset?.[key] || {}).map(Number);
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (!sched[d]?.ER)     emptyER.push(d);
+    if (wardDaysExpected.includes(d) && !sched[d]?.Ward)   emptyWard.push(d);
+    if (traumaDaysExpected.includes(d) && !sched[d]?.Trauma) emptyTrauma.push(d);
+  }
+
+  if (emptyER.length || emptyWard.length || emptyTrauma.length) {
+    const lines = [];
+    if (emptyER.length)     lines.push(`⚠️ ER 空班（${emptyER.length} 天）：${emptyER.join('、')} 日`);
+    if (emptyWard.length)   lines.push(`⚠️ Ward 空班（${emptyWard.length} 天）：${emptyWard.join('、')} 日`);
+    if (emptyTrauma.length) lines.push(`⚠️ Trauma 空班（${emptyTrauma.length} 天）：${emptyTrauma.join('、')} 日`);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:460px">
+        <div class="modal-header" style="background:var(--danger);color:#fff">
+          <h3>⚠️ 排班完成但有空班</h3>
+        </div>
+        <div class="modal-body">
+          <p style="margin-bottom:14px;font-size:14px">以下日期找不到可排班的人員，班表已儲存但這些天沒有值班醫師：</p>
+          ${lines.map(l => `<div style="background:var(--surface2);border-left:4px solid var(--danger);padding:10px 14px;border-radius:4px;margin-bottom:8px;font-size:13px;font-weight:600">${l}</div>`).join('')}
+          <p style="margin-top:14px;font-size:13px;color:var(--fg3)">建議：請相關醫師調整不值班日期後重新排班，或手動在班表中指派值班人員。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()" style="width:100%">知道了，前往班表查看</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  } else {
+    showToast('✅ 排班完成，所有班別均已排妥！');
+  }
+}
+
+// ─── Email ───────────────────────────────────────────────────────────────────
+function renderEmail() {
+  const el = document.getElementById('page-email');
+  const {year, month} = state.currentMonth;
+
+  // Compute ward days from current schedule
+  const schedKey = getScheduleKey();
+  const sched = state.schedule[schedKey] || {};
+  const wardDaysList = Object.keys(sched)
+    .filter(d => sched[d]['Ward'])
+    .map(Number)
+    .sort((a,b)=>a-b);
+
+  const wardDaysText = wardDaysList.length > 0
+    ? wardDaysList.map(d => {
+        const dow = new Date(year, month-1, d).getDay();
+        return `${month}/${d}(${DOW[dow]}) ${sched[d]['Ward']}`;
+      }).join('、')
+    : '（尚未排班）';
+
+  // Secretary email setting
+  const secEmail = state.secretaryEmail || '';
+
+  el.innerHTML = `
+    <!-- Secretary Ward Email Section -->
+    <div class="card" style="margin-bottom:16px;border:2px solid var(--accent)">
+      <div class="card-header" style="background:var(--accent);color:#fff">
+        <h2>📋 秘書通知 - Ward 班日期</h2>
+      </div>
+      <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div>
+            <div class="form-label">秘書 Email</div>
+            <div style="display:flex;gap:8px">
+              <input type="email" id="secretary-email" value="${secEmail}"
+                placeholder="secretary@hospital.tw" style="flex:1">
+              <button class="btn" onclick="saveSecretaryEmail()">儲存</button>
+            </div>
+          </div>
+          <div>
+            <div class="form-label">當月 Ward 班日期（自動從班表讀取）</div>
+            <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;line-height:1.8;min-height:60px">
+              ${wardDaysText}
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="sendSecretaryEmail()" style="justify-content:center;margin-top:4px">
+            📋 模擬發送 Ward 班通知給秘書
+          </button>
+        </div>
+        <div>
+          <div class="form-label">Email 內容預覽</div>
+          <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.7">
+            <div style="font-weight:700;margin-bottom:8px">主旨：【${year}年${month}月 Ward 值班日期通知】</div>
+            <div>您好，秘書：</div>
+            <br>
+            <div>${year}年${month}月 Ward 值班日期如下：</div>
+            <br>
+            <div style="color:var(--accent)">${wardDaysList.length > 0 ? wardDaysList.map(d => {
+              const dow = new Date(year, month-1, d).getDay();
+              return `• ${month}/${d}（${DOW[dow]}）- ${sched[d]['Ward']}`;
+            }).join('<br>') : '（尚無資料）'}</div>
+            <br>
+            <div>煩請協助安排相關行政事宜，謝謝！</div>
+            <div style="margin-top:8px;color:var(--fg3)">骨科值班管理系統</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card">
+        <div class="card-header"><h2>📤 醫師通知發送</h2></div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div class="form-label">發件帳號</div>
+            <input type="email" value="yjchen71@gmail.com" id="sender-email">
+          </div>
+          <div>
+            <div class="form-label">發送日期</div>
+            <input type="text" value="每月20日 09:00" readonly style="color:var(--fg3)">
+          </div>
+          <div>
+            <div class="form-label">截止日期</div>
+            <input type="text" value="每月25日" readonly style="color:var(--fg3)">
+          </div>
+          <div class="info-box" style="font-size:12px">
+            ⚠️ 實際 Gmail 發送需整合 Gmail API。此介面為模擬展示，可匯出收件人名單後手動發送。
+          </div>
+          <button class="btn btn-primary" onclick="sendEmailsNow()" style="justify-content:center">
+            ✉️ 立即模擬發送（醫師）
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h2>✉️ 醫師 Email 內容預覽</h2></div>
+        <div class="card-body">
+          <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:16px;font-size:13px;line-height:1.7">
+            <div style="font-weight:700;margin-bottom:8px">主旨：【${year}年${month}月值班】請填寫不值班日期</div>
+            <div>親愛的醫師，您好：</div>
+            <br>
+            <div>請在 <strong>${month > 1 ? month-1 : 12}月25日前</strong> 填寫 ${year}年${month}月不值班日期。</div>
+            <br>
+            <div>填寫網址：<span style="color:var(--accent)">[系統連結]</span></div>
+            <br>
+            <div style="color:var(--fg3);font-size:12px">
+              ・每月至少需有 10 天可排班<br>
+              ・ER 班每月約 3 班
+            </div>
+            <br>
+            <div>敬請配合，謝謝！</div>
+            <div style="margin-top:8px;color:var(--fg3)">骨科值班管理系統</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Email log -->
+    <div class="card">
+      <div class="card-header"><h2>📬 發送紀錄</h2></div>
+      <div id="email-log">
+        ${state.emailLog.length === 0
+          ? `<div style="padding:24px;text-align:center;color:var(--fg3)">尚無發送紀錄</div>`
+          : state.emailLog.map(log => `
+            <div class="email-item">
+              <div class="email-avatar">${log.to[0]}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600">${log.to}${log.isSecretary ? ' <span class="chip chip-blue" style="font-size:11px">秘書</span>' : ''}</div>
+                <div style="font-size:12px;color:var(--fg3)">${log.subject}</div>
+              </div>
+              <div style="font-size:11px;color:var(--fg3);white-space:nowrap">${new Date(log.sentAt).toLocaleString('zh-TW')}</div>
+              <span class="chip chip-green" style="flex-shrink:0">✓ 已送出</span>
+            </div>
+          `).join('')
+        }
+      </div>
+    </div>
+  `;
+}
+
+function saveSecretaryEmail() {
+  const val = document.getElementById('secretary-email').value.trim();
+  state.secretaryEmail = val;
+  saveState();
+  showToast('✅ 秘書 Email 已儲存');
+}
+
+function sendSecretaryEmail() {
+  const {year, month} = state.currentMonth;
+  const secEmail = state.secretaryEmail || '';
+  if (!secEmail) {
+    showToast('⚠️ 請先填寫秘書 Email');
+    return;
+  }
+  const schedKey = getScheduleKey();
+  const sched = state.schedule[schedKey] || {};
+  const wardDaysList = Object.keys(sched)
+    .filter(d => sched[d]['Ward'])
+    .map(Number).sort((a,b)=>a-b);
+
+  showConfirm('發送 Ward 班通知',
+    `將模擬發送 ${year}年${month}月 Ward 班日期（共${wardDaysList.length}天）給秘書：${secEmail}`,
+    () => {
+      state.emailLog.unshift({
+        to: `秘書 (${secEmail})`,
+        email: secEmail,
+        subject: `【${year}年${month}月 Ward 值班日期通知】`,
+        sentAt: Date.now(),
+        isSecretary: true,
+      });
+      saveState();
+      renderPage('email');
+      showToast(`📋 已模擬發送 Ward 班通知給秘書`);
+    }
+  );
+}
+
+function sendEmailsNow() {
+  const {year, month} = state.currentMonth;
+  const notReplied = state.staff.filter(s => !getReplies()[s.id]);
+  const targets = notReplied.length > 0 ? notReplied : state.staff;
+
+  showConfirm(`發送 Email 通知`,
+    `將發送通知給 ${targets.length} 位${notReplied.length > 0 ? '尚未回覆的' : ''}醫師：${targets.map(s=>s.id).join('、')}`,
+    () => {
+      targets.forEach(s => {
+        state.emailLog.unshift({
+          to: s.id,
+          email: s.email,
+          subject: `【${year}年${month}月值班】請填寫不值班日期`,
+          sentAt: Date.now(),
+        });
+      });
+      saveState();
+      renderPage('email');
+      renderPage('dashboard');
+      showToast(`✉️ 已模擬發送 ${targets.length} 封通知`);
+    }
+  );
+}
+
+// ─── Staff ───────────────────────────────────────────────────────────────────
+function renderStaff() {
+  const el = document.getElementById('page-staff');
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h2>人員名單</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>#</th>
+            <th>姓名</th>
+            <th>Email</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody id="staff-tbody">
+            ${state.staff.map((s, i) => `
+              <tr id="staff-row-${i}">
+                <td style="color:var(--fg3);font-variant-numeric:tabular-nums">${i+1}</td>
+                <td><strong>${s.id}</strong></td>
+                <td>
+                  <input type="email" value="${s.email}" id="email-${i}"
+                    onchange="updateStaffEmail(${i}, this.value)"
+                    style="width:100%;max-width:220px;font-size:12px;padding:4px 8px">
+                </td>
+                <td>—</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--fg3);margin-top:10px;padding:0 2px">Email 欄位可直接編輯，修改後自動儲存。</p>
+  `;
+}
+
+window.updateStaffEmail = function(i, val) {
+  state.staff[i].email = val;
+  saveState();
+};
+
+// ─── Modals ───────────────────────────────────────────────────────────────────
+function closeModal(id) {
+  document.getElementById(id).hidden = true;
+}
+
+let _confirmCallback = null;
+function showConfirm(title, body, cb) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-body').innerHTML = `<p style="font-size:14px;line-height:1.6">${body}</p>`;
+  _confirmCallback = cb;
+  document.getElementById('confirm-ok').onclick = () => {
+    closeModal('confirm-modal');
+    if (_confirmCallback) _confirmCallback();
+  };
+  document.getElementById('confirm-modal').hidden = false;
+}
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+    background:var(--fg);color:var(--bg);
+    padding:10px 20px;border-radius:99px;font-size:13px;font-weight:600;
+    z-index:9999;animation:fadeIn 0.2s ease;white-space:nowrap;
+    box-shadow:0 4px 20px rgba(0,0,0,0.3);
+  `;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2800);
+}
+
+// ─── Sidebar mobile ───────────────────────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('active');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('active');
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+// Hash mode: #fill/YYYY/MM → hide sidebar, show only doctor-reply page
+// NOTE: do NOT overwrite state.currentMonth or saveState() here —
+// the fill link opens in the doctor's browser; we must not corrupt the secretary's localStorage.
+function enterFillMode(year, month) {
+  // Use a session-only override so getReplies() reads the correct month
+  // without touching the persisted currentMonth.
+  state._fillMonthOverride = {year, month};
+  dbReplies = {};
+  subscribeReplies(getMonthKey(year, month));
+  const sidebar = document.querySelector('.sidebar');
+  const topbar = document.querySelector('.topbar');
+  const appLayout = document.querySelector('.app-layout');
+  if (sidebar) sidebar.style.display = 'none';
+  if (topbar) topbar.style.display = 'none';
+  if (appLayout) {
+    appLayout.style.gridTemplateColumns = '1fr';
+    appLayout.style.maxWidth = '640px';
+    appLayout.style.margin = '0 auto';
+  }
+  showPage('doctor-reply');
+}
+
+(async function boot() {
+  window.addEventListener('hashchange', function() {
+    const m = (location.hash||'').match(/#fill-(\d{4})-(\d{2})/);
+    if (m) enterFillMode(parseInt(m[1]), parseInt(m[2]));
+  });
+  const hm = (location.hash||'').match(/#fill-(\d{4})-(\d{2})/);
+  const fill = hm ? {year: parseInt(hm[1]), month: parseInt(hm[2])} : getMonthFromURL();
+  if (fill) {                                   // doctor: no login, name list from server
+    const {data} = await sb.rpc('list_doctors');
+    if (data && data.length) state.staff = data.map(d => ({id: d.name, email: '', color: '#6b7280'}));
+    enterFillMode(fill.year, fill.month);
+    return;
+  }
+  const {data: {session}} = await sb.auth.getSession();   // secretary
+  if (!session) { showAuthGate(); return; }
+  _isSecretary = true;
+  await loadRemoteState();
+  const nav = document.querySelector('.nav');
+  if (nav) nav.insertAdjacentHTML('beforeend', '<div class="nav-section-label" style="margin-top:12px">帳號</div><button class="nav-item" onclick="doSignOut()"><span class="icon">🚪</span> 登出</button>');
+  subscribeReplies(getMonthKey());
+  showPage('dashboard');
+})();
+</script>
+
+</body></html>
