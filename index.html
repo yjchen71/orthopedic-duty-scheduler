@@ -913,7 +913,7 @@ function loadState() {
       holidays: {},         // {year-month: [days]} 國定假日/補班（額外假日）
       extraWorkdays: {},    // {year-month: [days]} 補班（原本是假日但需上班）
     },
-    notifyLog: {},          // {year-month: timestamp} 20日通知發送紀錄
+    notifyLog: {},
   };
 }
 
@@ -939,7 +939,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-empno5';
+const APP_VERSION = '2026-11-22-notime';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -1304,32 +1304,9 @@ function renderDashboard() {
   const scheduleKey = `${year}-${month}`;
   const hasSchedule = !!state.schedule[scheduleKey];
   const daysInMonth = new Date(year, month, 0).getDate();
-  const today = new Date();
-  const sendDate = new Date(year, month-2, 20); // 20th of previous month
-  const schedDate = new Date(year, month-2, 25);
-
   document.getElementById('pending-badge').textContent = pending;
 
-  // 20日提醒：如果今天 >= 上個月20日 且本月通知尚未發送
-  const schedKey = `${year}-${month}`;
-  const prevMonth = month > 1 ? month-1 : 12;
-  const prevYear = month > 1 ? year : year-1;
-  const notify20 = new Date(prevYear, prevMonth-1, 20);
-  const alreadyNotified = !!state.notifyLog?.[schedKey];
-  const show20Alert = (today >= notify20) && !alreadyNotified;
-
   el.innerHTML = `
-    ${show20Alert ? `
-    <div style="background:var(--warn-light);border:1.5px solid var(--warn);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-      <div>
-        <div style="font-weight:700;color:var(--warn);font-size:15px">📢 已到每月20日 — 請傳送填寫連結！</div>
-        <div style="font-size:13px;color:var(--fg2);margin-top:4px">請複製填寫連結，透過 LINE 發送給所有醫師填寫 ${year}年${month}月不值班日期。</div>
-      </div>
-      <button class="btn btn-primary" style="background:var(--warn);flex-shrink:0" onclick="copyFillLink(this)">
-        📋 複製填寫連結
-      </button>
-    </div>` : ''}
-
     <div class="stats-row">
       <div class="stat-card">
         <div class="stat-label">排班月份</div>
@@ -1345,7 +1322,7 @@ function renderDashboard() {
       <div class="stat-card">
         <div class="stat-label">未回覆人數</div>
         <div class="stat-value" style="color:var(--danger)">${pending}</div>
-        <div class="stat-sub">截止日：${prevMonth}月25日</div>
+        <div class="stat-sub">收齊後由秘書排班</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">排班狀態</div>
@@ -1362,9 +1339,9 @@ function renderDashboard() {
         <div class="card-header"><h2>📅 本月流程</h2></div>
         <div class="card-body">
           ${[
-            {date: `${month > 1 ? month-1 : 12}/20`, label: '透過 LINE 傳送填寫連結給醫師', done: today >= sendDate},
-            {date: `${month > 1 ? month-1 : 12}/25`, label: '截止回覆，秘書按下排班按鈕', done: today >= schedDate},
-            {date: `${month}/1`, label: `${year}年${month}月班表生效`, done: false},
+            {date: '步驟 1', label: '透過 LINE 傳送填寫連結給醫師', done: repliedCount > 0},
+            {date: '步驟 2', label: '醫師回覆後，秘書按下自動排班（排班後自動鎖定填寫）', done: hasSchedule},
+            {date: '步驟 3', label: `${year}年${month}月班表生效`, done: false},
           ].map(t => `
             <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px">
               <div style="width:32px;height:32px;border-radius:50%;background:${t.done ? 'var(--success-light)' : 'var(--surface2)'};color:${t.done ? 'var(--success)' : 'var(--fg3)'};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${t.done ? '✓' : '○'}</div>
@@ -1555,7 +1532,7 @@ window.copyFillLink = function(btn) {
 window.copyLineMsg = function() {
   const {year, month} = state.currentMonth;
   const link = getFillLink();
-  const text = `【${year}年${month}月值班填寫通知】\n\n請點選以下連結，填寫本月無法值班的日期：\n${link}\n\n開啟後請選擇自己的姓名，並輸入您的員工編號再填寫。\n\n填寫限制：\n・每月至少保留 10 天可值班\n・假日中至少 1 天可值班\n\n請於三日內完成填寫，謝謝！`;
+  const text = `【${year}年${month}月值班填寫通知】\n\n請點選以下連結，填寫本月無法值班的日期：\n${link}\n\n開啟後請選擇自己的姓名，並輸入您的員工編號再填寫。\n\n填寫限制：\n・每月至少保留 10 天可值班\n・假日中至少 1 天可值班\n\n煩請儘早完成填寫，謝謝！`;
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById('copy-msg-btn');
     if (btn) { btn.textContent = '✅ 已複製！'; setTimeout(() => { btn.textContent = '💬 複製含說明的訊息'; }, 2000); }
@@ -3132,14 +3109,6 @@ function renderEmail() {
             <div class="form-label">發件帳號</div>
             <input type="email" value="yjchen71@gmail.com" id="sender-email">
           </div>
-          <div>
-            <div class="form-label">發送日期</div>
-            <input type="text" value="每月20日 09:00" readonly style="color:var(--fg3)">
-          </div>
-          <div>
-            <div class="form-label">截止日期</div>
-            <input type="text" value="每月25日" readonly style="color:var(--fg3)">
-          </div>
           <div class="info-box" style="font-size:12px">
             ⚠️ 實際 Gmail 發送需整合 Gmail API。此介面為模擬展示，可匯出收件人名單後手動發送。
           </div>
@@ -3156,7 +3125,7 @@ function renderEmail() {
             <div style="font-weight:700;margin-bottom:8px">主旨：【${year}年${month}月值班】請填寫不值班日期</div>
             <div>親愛的醫師，您好：</div>
             <br>
-            <div>請在 <strong>${month > 1 ? month-1 : 12}月25日前</strong> 填寫 ${year}年${month}月不值班日期。</div>
+            <div>請儘早填寫 ${year}年${month}月不值班日期。</div>
             <br>
             <div>填寫網址：<span style="color:var(--accent)">[系統連結]</span></div>
             <br>
