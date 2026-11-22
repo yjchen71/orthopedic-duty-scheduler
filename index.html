@@ -939,7 +939,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-wardhol';
+const APP_VERSION = '2026-11-22-erhol';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2396,6 +2396,32 @@ function runAutoSchedule() {
   const daysInMonth = new Date(year, month, 0).getDate();
   const key = getScheduleKey();
 
+  // Pre-check: any day on which every doctor has marked off? Warn BEFORE scheduling.
+  const noOneDays = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (state.staff.every(s => (getReplies()[s.id]?.offDays || []).includes(d))) noOneDays.push(d);
+  }
+  if (noOneDays.length) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:460px;width:92vw">
+        <div class="modal-header" style="background:var(--danger);color:#fff"><h3>🚫 有日期全部醫師都預假</h3></div>
+        <div class="modal-body">
+          <p style="font-size:14px;margin-bottom:12px">以下日期所有醫師都登記不能值班，排班後這些天一定會是空班：</p>
+          ${noOneDays.map(d => `<div style="background:var(--surface2);border-left:4px solid var(--danger);padding:10px 14px;border-radius:4px;margin-bottom:8px;font-size:13px;font-weight:600">${month}/${d}(${DOW[new Date(year, month - 1, d).getDay()]})</div>`).join('')}
+          <p style="font-size:13px;color:var(--fg3);margin-top:12px">建議：先請至少一位醫師釋出這些日期的預假（可在「回覆狀況」頁修改），再執行自動排班。</p>
+        </div>
+        <div class="modal-footer" style="display:flex;gap:10px">
+          <button class="btn btn-secondary" style="flex:1" onclick="this.closest('.modal-overlay').remove()">取消，先去處理</button>
+          <button class="btn btn-primary" style="flex:1" id="noone-continue">仍要繼續排班</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#noone-continue').onclick = () => { ov.remove(); showAutoScheduleDialog(year, month, daysInMonth, key); };
+    return;
+  }
+
   // Show input dialog for Trauma days
   showAutoScheduleDialog(year, month, daysInMonth, key);
 }
@@ -2516,9 +2542,9 @@ function rebalanceDays(sched, movable, people, offMap, load, daysOf, prefer) {
   }
 }
 
-// Swap Ward days between people so holiday Ward shifts are spread evenly too
+// Swap days between people so holiday shifts (Ward or ER) are spread evenly too
 // (total Ward counts stay unchanged because each move is a one-for-one swap).
-function rebalanceHolidayWard(sched, movable, people, offMap, daysOf, isHol) {
+function rebalanceHolidayShifts(sched, movable, people, offMap, daysOf, isHol) {
   const hc = n => daysOf[n].filter(d => isHol(d)).length;
   for (let g = 0; g < 300; g++) {
     let moved = false;
@@ -2630,7 +2656,8 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
   const traumaDays = Object.keys(traumaSched).map(Number).sort((a,b)=>a-b);
 
   // ── Step 2: Ward days ──
-  const isWeekend = d => { const dow = new Date(year, month-1, d).getDay(); return dow===0||dow===6; };
+  // "weekend" here means any holiday (Sat/Sun/national holiday, minus make-up workdays)
+  const isWeekend = d => isHoliday(year, month, d);
   let wardSched = {...wardSchedInput};
 
   // wardAutoAssignDays: days from secretary preset without assigned names → need auto-assign
@@ -2710,7 +2737,7 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
     WARD_STAFF.forEach(n => { wDays[n] = []; });
     Object.entries(wardSched).forEach(([day, name]) => { wDays[name]?.push(parseInt(day)); });
     rebalanceDays(wardSched, autoWardDays, WARD_STAFF, offMap, wardCount, wDays, preferMapW);
-    rebalanceHolidayWard(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
+    rebalanceHolidayShifts(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
   }
 
   const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
@@ -2789,6 +2816,8 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
 
   // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
   rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
+  // Third pass: spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
+  rebalanceHolidayShifts(erSched, freeDays, state.staff.map(s => s.id), offMap2, erDaysOfPerson, isHol);
 
   // ── Build final schedule object ──
   const sched = {};
@@ -2881,6 +2910,14 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
     });
   }
 
+  const erHolOf = n => Object.entries(sched).filter(([k, v]) => v.ER === n && isHol(+k)).length;
+  if (spread(allNames, erHolOf) > 1) {
+    const holTotal = Object.keys(sched).filter(k => isHol(+k)).length;
+    const lo = Math.min(...allNames.map(erHolOf));
+    imbalance.push(`<div style="font-weight:700;margin:10px 0 4px">ER 假日班不平均（本月假日 ${holTotal} 天，平均約 ${(holTotal / allNames.length).toFixed(1)} 班）</div>
+      <div style="font-size:13px">${allNames.map(n => `${n} ${erHolOf(n)}`).join('、')}<br>
+      <span style="color:var(--fg3)">${allNames.filter(n => erHolOf(n) > lo + 1).join('、')} 的假日班較多，可能因為 Trauma/Ward 假日班已連帶排入 ER，或其他人假日有預假、連續日限制而無法互換。</span></div>`);
+  }
   const wardHolOf = n => Object.entries(sched).filter(([k, v]) => v.Ward === n && isHol(+k)).length;
   if (Object.keys(wardSched).length > 0 && spread(WARD_STAFF, wardHolOf) > 1) {
     imbalance.push(`<div style="font-weight:700;margin:10px 0 4px">Ward 假日班不平均</div>
