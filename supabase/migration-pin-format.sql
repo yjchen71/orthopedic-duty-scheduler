@@ -1,7 +1,7 @@
--- Use employee numbers (3-20 letters/digits, case-insensitive) as the doctor PIN.
+-- Use 5-digit employee numbers as the doctor PIN.
 -- Safe to run whether or not migration-pin.sql was already applied.
 alter table doctor_pins drop constraint if exists doctor_pins_pin_check;
-alter table doctor_pins add constraint doctor_pins_pin_check check (pin ~ '^[A-Za-z0-9]{3,20}$');
+alter table doctor_pins add constraint doctor_pins_pin_check check (pin ~ '^\d{5}$');
 
 create or replace function verify_pin(p_name text, p_pin text)
 returns text language plpgsql security definer set search_path = public as $$

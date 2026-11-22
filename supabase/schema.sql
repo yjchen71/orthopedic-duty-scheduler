@@ -31,11 +31,11 @@ create table if not exists month_locks (
   locked_at timestamptz not null default now()
 );
 
--- Per-doctor PIN = employee number, 3-20 letters/digits, case-insensitive
+-- Per-doctor PIN = employee number (exactly 5 digits)
 -- (set by the secretary, never readable by anonymous users)
 create table if not exists doctor_pins (
   name text primary key references doctors(name) on update cascade on delete cascade,
-  pin text not null check (pin ~ '^[A-Za-z0-9]{3,20}$')
+  pin text not null check (pin ~ '^\d{5}$')
 );
 -- Failed-attempt counter: 5 wrong PINs lock that doctor out for 15 minutes
 create table if not exists pin_attempts (

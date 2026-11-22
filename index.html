@@ -939,7 +939,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-empno';
+const APP_VERSION = '2026-11-22-empno5';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -1032,7 +1032,7 @@ async function loadPins() {
   _pinsLoaded = true;
 }
 async function setDoctorPin(name, pin) {
-  if (!/^[A-Za-z0-9]{3,20}$/.test(pin)) { showToast('⚠️ 員工編號需為 3～20 個英數字'); return false; }
+  if (!/^\d{5}$/.test(pin)) { showToast('⚠️ 員工編號需為 5 位數字'); return false; }
   await sb.from('doctors').upsert({name, sort_order: state.staff.findIndex(s => s.id === name)});  // make sure the doctor row exists
   const {error} = await sb.from('doctor_pins').upsert({name, pin});
   if (error) { showToast('⚠️ 儲存 PIN 失敗：' + error.message); return false; }
@@ -1052,7 +1052,7 @@ window.importPins = function() {
       <div class="modal-header"><h3>批次匯入員工編號</h3></div>
       <div class="modal-body">
         <p style="font-size:13px;color:var(--fg2);margin-bottom:8px">每行一位，格式：姓名 員工編號（可從 Excel 直接複製兩欄貼上）</p>
-        <textarea id="pin-import" rows="10" style="width:100%;font-size:13px;font-family:monospace" placeholder="江毅彥 A12345&#10;張書豪 A12346"></textarea>
+        <textarea id="pin-import" rows="10" style="width:100%;font-size:13px;font-family:monospace" placeholder="江毅彥 12345&#10;張書豪 12346"></textarea>
         <div id="pin-import-msg" style="font-size:12px;color:var(--danger);margin-top:6px;min-height:16px"></div>
       </div>
       <div class="modal-footer" style="display:flex;gap:10px">
@@ -1066,7 +1066,7 @@ window.importPins = function() {
     const names = state.staff.map(s => s.id);
     const rows = ov.querySelector('#pin-import').value.split('\n').map(l => l.trim()).filter(Boolean)
       .map(l => l.split(/[\s,，:：\t]+/).filter(Boolean));
-    const bad = rows.filter(r => r.length < 2 || !names.includes(r[0]) || !/^[A-Za-z0-9]{3,20}$/.test(r[1]));
+    const bad = rows.filter(r => r.length < 2 || !names.includes(r[0]) || !/^\d{5}$/.test(r[1]));
     if (bad.length) { msg.textContent = '格式或姓名不符：' + bad.map(r => r.join(' ')).join('；'); return; }
     let ok = 0;
     for (const [n, pin] of rows) if (await setDoctorPin(n, pin)) ok++;
@@ -1665,18 +1665,18 @@ async function renderDoctorReply() {
         </div>
         ${selectedName ? `<div class="form-group">
           <label class="form-label">請輸入您的員工編號</label>
-          <input id="doctor-pin" type="password" maxlength="20" autocomplete="off" autocapitalize="off" placeholder="員工編號"
-            style="font-size:20px;letter-spacing:3px;text-align:center"
+          <input id="doctor-pin" type="password" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="●●●●●"
+            style="font-size:22px;letter-spacing:8px;text-align:center"
             onkeydown="if(event.key==='Enter')verifyDoctorPin()">
           <div style="color:var(--danger);font-size:13px;min-height:20px;margin-top:6px">${pinError}</div>
-          <div style="font-size:12px;color:var(--fg3);margin-top:4px">用來確認是您本人填寫，不分大小寫。</div>
+          <div style="font-size:12px;color:var(--fg3);margin-top:4px">用來確認是您本人填寫。</div>
           <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px" onclick="verifyDoctorPin()">確認</button>
         </div>` : ''}
       </div>`;
     window.handleNameChange = function(v) { selectedName = v; pinError = ''; renderPinGate(); };
     window.verifyDoctorPin = async function() {
       const pin = (document.getElementById('doctor-pin')?.value || '').trim();
-      if (!/^[A-Za-z0-9]{3,20}$/.test(pin)) { pinError = '員工編號為 3～20 個英數字'; renderPinGate(); return; }
+      if (!/^\d{5}$/.test(pin)) { pinError = '員工編號為 5 位數字'; renderPinGate(); return; }
       const r = await fetchMyReply(selectedName, pin);
       if (r.status !== 'ok') { pinError = PIN_MSG[r.status] || '⚠️ 驗證失敗，請稍後再試'; renderPinGate(); return; }
       _doctorPin = pin;
@@ -3286,9 +3286,9 @@ function renderStaff() {
                     style="width:100%;max-width:220px;font-size:12px;padding:4px 8px">
                 </td>
                 <td style="white-space:nowrap">
-                  <input type="text" maxlength="20" value="${pinsByName[s.id] || ''}" placeholder="尚未設定" autocomplete="off"
+                  <input type="text" inputmode="numeric" maxlength="5" value="${pinsByName[s.id] || ''}" placeholder="尚未設定" autocomplete="off"
                     onchange="editPin(${i}, this.value)"
-                    style="width:140px;font-size:14px;padding:4px 8px;font-family:var(--mono)">
+                    style="width:100px;font-size:14px;letter-spacing:2px;padding:4px 8px;font-family:var(--mono)">
                 </td>
               </tr>
             `).join('')}
@@ -3296,7 +3296,7 @@ function renderStaff() {
         </table>
       </div>
     </div>
-    <p style="font-size:12px;color:var(--fg3);margin-top:10px;padding:0 2px">Email 欄位可直接編輯，修改後自動儲存。員工編號是醫師填寫時的驗證碼（不分大小寫），可逐一輸入或用「批次匯入」。醫師連續輸錯 5 次會鎖定 15 分鐘。</p>
+    <p style="font-size:12px;color:var(--fg3);margin-top:10px;padding:0 2px">Email 欄位可直接編輯，修改後自動儲存。員工編號（5 碼數字）是醫師填寫時的驗證碼，可逐一輸入或用「批次匯入」。醫師連續輸錯 5 次會鎖定 15 分鐘。</p>
   `;
   if (_isSecretary && !_pinsLoaded) loadPins().then(() => { if (currentPage === 'staff') renderStaff(); });
 }
