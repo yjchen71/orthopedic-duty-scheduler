@@ -2478,6 +2478,43 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
   document.body.appendChild(overlay);
 }
 
+// ─── Balance helper ───────────────────────────────────────────────────────────
+// Moves auto-assigned days from over-loaded people to under-loaded ones (never off days,
+// never back-to-back with the receiver's own days) until counts differ by at most 1.
+// sched: {day: name}   movable: days that may be reassigned   people: eligible names
+// load: {name: count} (updated in place)   daysOf: {name: [days]} (updated in place)
+// prefer: {name: Set} only used to choose WHICH day to move (keep the donor's preferred days)
+function rebalanceDays(sched, movable, people, offMap, load, daysOf, prefer) {
+  for (let guard = 0; guard < 500; guard++) {
+    let moved = false;
+    const donors = [...people].sort((a, b) => load[b] - load[a]);
+    outer:
+    for (const donor of donors) {
+      const receivers = [...people].sort((a, b) => load[a] - load[b]);
+      for (const rec of receivers) {
+        if (load[donor] - load[rec] < 2) break;
+        const cands = movable.filter(d => sched[d] === donor
+          && !(offMap[rec] && offMap[rec].has(d))
+          && !daysOf[rec].includes(d - 1) && !daysOf[rec].includes(d + 1));
+        if (!cands.length) continue;
+        cands.sort((a, b) => {
+          const sa = (prefer[donor]?.has(a) ? 2 : 0) - (prefer[rec]?.has(a) ? 1 : 0);
+          const sb = (prefer[donor]?.has(b) ? 2 : 0) - (prefer[rec]?.has(b) ? 1 : 0);
+          return sa - sb;
+        });
+        const d = cands[0];
+        sched[d] = rec;
+        load[donor]--; load[rec]++;
+        daysOf[donor] = daysOf[donor].filter(x => x !== d);
+        daysOf[rec].push(d);
+        moved = true;
+        break outer;
+      }
+    }
+    if (!moved) break;
+  }
+}
+
 function executeAutoSchedule(year, month, daysInMonth, key) {
   const traumaRaw = document.getElementById('trauma-input').value.trim();
   const wardRaw   = document.getElementById('ward-input').value.trim();
@@ -2576,6 +2613,7 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
   const effectiveWardCount = totalPresetDays > 0 ? totalPresetDays : wardDaysCount;
   const remainWardCount = effectiveWardCount - specifiedWardDays.length;
 
+  const autoWardDays = [];
   if (remainWardCount > 0) {
     // Off-day sets and prefer-day sets per person
     const offMap = {};
@@ -2619,19 +2657,26 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
         if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
         return true;
       }).sort((a,b) => {
-        // Prefer bonus
+        // Balance first (fewest ward shifts), preferred day is only a tie-breaker
+        if (wardCount[a] !== wardCount[b]) return wardCount[a] - wardCount[b];
         const aPref = (preferMapW[a]?.has(d)) ? -1 : 0;
         const bPref = (preferMapW[b]?.has(d)) ? -1 : 0;
-        if (aPref !== bPref) return aPref - bPref;
-        return wardCount[a] - wardCount[b];
+        return aPref - bPref;
       });
 
       if (available.length > 0) {
         wardSched[d] = available[0];
         wardCount[available[0]]++;
         assignedDaysOfPerson[available[0]].push(d);
+        autoWardDays.push(d);
       }
     }
+
+    // Second pass: even out ward shifts among the 7 ward staff
+    const wDays = {};
+    WARD_STAFF.forEach(n => { wDays[n] = []; });
+    Object.entries(wardSched).forEach(([day, name]) => { wDays[name]?.push(parseInt(day)); });
+    rebalanceDays(wardSched, autoWardDays, WARD_STAFF, offMap, wardCount, wDays, preferMapW);
   }
 
   const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
@@ -2690,12 +2735,11 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
       if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
       return true;
     }).sort((a, b) => {
-      // Sort by: prefer bonus first (prefers this day → rank higher)
+      // Balance first: fewest total ER shifts; preferred day / weekend count only break ties
+      if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
       const aPref = preferMap[a.id].has(d) ? -1 : 0;
       const bPref = preferMap[b.id].has(d) ? -1 : 0;
       if (aPref !== bPref) return aPref - bPref;
-      // Then by total ER count, then weekend ER count
-      if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
       if (wknd) return erWkndCount[a.id] - erWkndCount[b.id];
       return 0;
     });
@@ -2708,6 +2752,9 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
       erDaysOfPerson[chosen.id].push(d);
     }
   }
+
+  // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
+  rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
 
   // ── Build final schedule object ──
   const sched = {};
