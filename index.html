@@ -944,6 +944,7 @@ let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
 let _dbChan = null;
 let _curMonthKey = null;
+let monthLocked = false;     // secretary view: is the current month's reply form locked?
 
 function getMonthKey(year, month) {
   const {year: y, month: m} = (year == null) ? state.currentMonth : {year, month};
@@ -961,8 +962,28 @@ async function loadReplies(monthKey) {
     offDays: r.off_days || [], preferDays: r.prefer_days || [],
     submittedAt: new Date(r.submitted_at).getTime() }; });
   dbReplies = fresh;
+  const lk = await sb.from('month_locks').select('month').eq('month', monthKey).maybeSingle();
+  if (monthKey !== _curMonthKey) return;
+  monthLocked = !!(lk.data);
   if (currentPage === 'replies' || currentPage === 'dashboard') renderPage(currentPage);
 }
+
+async function lockMonth(monthKey) {
+  const {error} = await sb.from('month_locks').upsert({month: monthKey});
+  if (error) { showToast('⚠️ 鎖定失敗：' + error.message); return; }
+  if (monthKey === _curMonthKey) { monthLocked = true; if (currentPage === 'replies') renderPage('replies'); }
+}
+window.unlockMonth = async function() {
+  const monthKey = getMonthKey();
+  if (!confirm('解除鎖定後，醫師可以再次修改本月的回覆。確定要解除嗎？')) return;
+  const {error} = await sb.from('month_locks').delete().eq('month', monthKey);
+  if (error) { showToast('⚠️ 解除失敗：' + error.message); return; }
+  monthLocked = false; showToast('🔓 已解除鎖定'); renderPage(currentPage);
+};
+window.lockMonthNow = async function() {
+  if (!confirm('鎖定後，醫師將無法再修改本月的回覆。確定要鎖定嗎？')) return;
+  await lockMonth(getMonthKey()); showToast('🔒 已鎖定');
+};
 
 function subscribeReplies(monthKey) {
   _curMonthKey = monthKey;
@@ -1368,7 +1389,15 @@ function renderReplies() {
   const {year, month} = state.currentMonth;
   const daysInMonth = new Date(year, month, 0).getDate();
 
+  const lockBanner = monthLocked
+    ? `<div class="info-box" style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+         <span>🔒 <strong>本月已鎖定</strong>：已執行自動排班，醫師無法再修改回覆。</span>
+         <button class="btn btn-sm btn-secondary" onclick="unlockMonth()">解除鎖定</button></div>`
+    : `<div class="info-box" style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+         <span>🔓 本月開放填寫中。執行「自動排班」後會自動鎖定。</span>
+         <button class="btn btn-sm btn-secondary" onclick="lockMonthNow()">立即鎖定</button></div>`;
   el.innerHTML = `
+    ${lockBanner}
     <!-- 通知訊息卡 -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
@@ -1505,8 +1534,26 @@ function editReply(name) {
 }
 
 // ─── Doctor Reply ─────────────────────────────────────────────────────────────
+function lockedPageHTML(year, month) {
+  return `
+    <div class="reply-header" style="background:var(--fg3)">
+      <h1>🔒 填寫已截止</h1>
+      <p>${year}年${month}月 值班意願回覆</p>
+    </div>
+    <div class="reply-body" style="text-align:center;padding-top:40px">
+      <div style="font-size:48px;margin-bottom:16px">🔒</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:8px">本月已完成排班，無法再修改</div>
+      <div style="font-size:13px;color:var(--fg3)">如需調整，請直接聯絡秘書。</div>
+    </div>`;
+}
+
 async function renderDoctorReply() {
   const el = document.getElementById('page-doctor-reply');
+  if (state._fillMonthOverride && !_isSecretary) {
+    const {year, month} = state._fillMonthOverride;
+    const {data: locked} = await sb.rpc('is_month_locked', {p_month: getMonthKey(year, month)});
+    if (locked) { el.innerHTML = lockedPageHTML(year, month); return; }
+  }
 
   // In fill mode (hash link), use the month from the URL, not the secretary's currentMonth
   const {year, month} = state._fillMonthOverride || state.currentMonth;
@@ -1703,6 +1750,7 @@ async function renderDoctorReply() {
         [...preferDays].sort((a,b) => a-b)
       );
     } catch(e) {
+      if (/locked/i.test(e.message || '')) { renderDoctorReply(); return; }
       showToast('⚠️ 儲存失敗，請重試');
       console.error('submitReply error', e);
       return;
@@ -2673,6 +2721,7 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
   state.schedule[key] = sched;
   state.autoScheduled = true;
   saveState();
+  lockMonth(getMonthKey()).then(() => showToast('🔒 已鎖定本月醫師填寫'));
 
   // Close dialog
   document.querySelector('.modal-overlay')?.remove();

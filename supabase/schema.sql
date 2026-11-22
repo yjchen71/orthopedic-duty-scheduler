@@ -25,6 +25,13 @@ create table if not exists app_state (
   updated_at timestamptz not null default now()
 );
 
+-- Months whose reply form is locked (set automatically after 自動排班)
+create table if not exists month_locks (
+  month text primary key check (month ~ '^\d{4}-\d{2}$'),
+  locked_at timestamptz not null default now()
+);
+
+alter table month_locks enable row level security;
 alter table doctors   enable row level security;
 alter table replies   enable row level security;
 alter table app_state enable row level security;
@@ -33,17 +40,22 @@ alter table app_state enable row level security;
 -- Turn OFF "Allow new users to sign up" so nobody else can become one.
 create policy secretary_all on doctors   for all to authenticated using (true) with check (true);
 create policy secretary_all on replies   for all to authenticated using (true) with check (true);
+create policy secretary_all on month_locks for all to authenticated using (true) with check (true);
 create policy secretary_all on app_state for all to authenticated using (true) with check (true);
 
 -- Newer Supabase projects do not expose new tables to the API automatically.
 -- Grant table privileges to signed-in users only (never to anon).
 grant usage on schema public to authenticated;
-grant select, insert, update, delete on table doctors, replies, app_state to authenticated;
+grant select, insert, update, delete on table doctors, replies, app_state, month_locks to authenticated;
 
 -- Doctors are anonymous: they only get these narrow functions.
 create or replace function list_doctors()
 returns table(name text) language sql security definer set search_path = public as
 $$ select name from doctors order by sort_order, name $$;
+
+create or replace function is_month_locked(p_month text)
+returns boolean language sql security definer set search_path = public as
+$$ select exists (select 1 from month_locks where month = p_month) $$;
 
 create or replace function get_reply(p_month text, p_name text)
 returns table(off_days int[], prefer_days int[]) language sql security definer set search_path = public as
@@ -54,6 +66,10 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   if p_month !~ '^\d{4}-\d{2}$' then raise exception 'bad month'; end if;
   if not exists (select 1 from doctors where name = p_name) then raise exception 'unknown doctor'; end if;
+  -- anonymous (doctor) writes are refused once the month is locked; the secretary may still edit
+  if auth.uid() is null and exists (select 1 from month_locks where month = p_month) then
+    raise exception 'month locked';
+  end if;
   insert into replies (month, doctor_name, off_days, prefer_days, submitted_at)
   values (p_month, p_name, coalesce(p_off,'{}'), coalesce(p_prefer,'{}'), now())
   on conflict (month, doctor_name) do update
@@ -61,6 +77,7 @@ begin
 end $$;
 
 grant execute on function list_doctors()  to anon, authenticated;
+grant execute on function is_month_locked(text) to anon, authenticated;
 grant execute on function get_reply(text,text) to anon, authenticated;
 grant execute on function submit_reply(text,text,int[],int[]) to anon, authenticated;
 
