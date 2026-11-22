@@ -939,7 +939,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-balance';
+const APP_VERSION = '2026-11-22-suggest';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2815,6 +2815,39 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
       <span style="color:var(--fg3)">可能原因：部分 Ward 班已由秘書「固定指派」指定人員，或醫師不值班日期造成限制。</span></div>`);
   }
 
+  // ── Suggestions: which doctor could release which off-day to fix the problem ──
+  const dayLabel = d => `${month}/${d}(${DOW[new Date(year, month - 1, d).getDay()]})`;
+  const wardDaysOf = n => Object.entries(sched).filter(([, v]) => v.Ward === n).map(([k]) => +k);
+  const suggestions = [];
+  emptyER.forEach(d => {
+    const c = allNames.filter(n => offMap2[n].has(d) && !erDaysOfPerson[n].includes(d - 1) && !erDaysOfPerson[n].includes(d + 1))
+      .sort((a, b) => erOf(a) - erOf(b)).slice(0, 3);
+    suggestions.push(c.length
+      ? `${dayLabel(d)} ER 空班：可請 ${c.map(n => `${n}（目前 ER ${erOf(n)} 班）`).join('、')} 釋出該日預假`
+      : `${dayLabel(d)} ER 空班：沒有人只因預假而無法值班（其餘人會連續值班），需手動指派`);
+  });
+  emptyWard.forEach(d => {
+    const c = WARD_STAFF.filter(n => (getReplies()[n]?.offDays || []).includes(d) && !wardDaysOf(n).includes(d - 1) && !wardDaysOf(n).includes(d + 1))
+      .sort((a, b) => wdOf(a) - wdOf(b)).slice(0, 3);
+    suggestions.push(c.length
+      ? `${dayLabel(d)} Ward 空班：可請 ${c.map(n => `${n}（目前 Ward ${wdOf(n)} 班）`).join('、')} 釋出該日預假`
+      : `${dayLabel(d)} Ward 空班：沒有人只因預假而無法值班，需手動指派`);
+  });
+  if (spread(allNames, erOf) > 1) {
+    const lo = Math.min(...allNames.map(erOf));
+    allNames.filter(n => erOf(n) > lo + 1).forEach(donor => {
+      const opts = [];
+      allNames.filter(r => erOf(r) <= erOf(donor) - 2).forEach(rec => {
+        const days = freeDays.filter(d => erSched[d] === donor && offMap2[rec].has(d)
+          && !erDaysOfPerson[rec].includes(d - 1) && !erDaysOfPerson[rec].includes(d + 1));
+        if (days.length) opts.push({rec, days});
+      });
+      opts.sort((a, b) => erOf(a.rec) - erOf(b.rec));
+      opts.slice(0, 4).forEach(o => suggestions.push(
+        `請 ${o.rec}（ER ${erOf(o.rec)} 班）釋出 ${o.days.map(dayLabel).join('、')} 其中一天的預假，該天可改由 ${o.rec} 值班，讓 ${donor} 由 ${erOf(donor)} 班減為 ${erOf(donor) - 1} 班`));
+    });
+  }
+
   if (emptyER.length || emptyWard.length || emptyTrauma.length || imbalance.length) {
     const lines = [];
     if (emptyER.length)     lines.push(`⚠️ ER 空班（${emptyER.length} 天）：${emptyER.join('、')} 日`);
@@ -2832,6 +2865,10 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
           ${lines.map(l => `<div style="background:var(--surface2);border-left:4px solid var(--danger);padding:10px 14px;border-radius:4px;margin-bottom:8px;font-size:13px;font-weight:600">${l}</div>`).join('')}` : ''}
           ${imbalance.length ? `<div style="background:var(--warn-light);border-left:4px solid var(--warn);padding:10px 14px;border-radius:4px;margin-top:${lines.length ? 14 : 0}px">
             <div style="font-size:14px;font-weight:700;margin-bottom:6px">班數無法平均分配</div>${imbalance.join('')}</div>` : ''}
+          ${suggestions.length ? `<div style="background:var(--accent-light);border-left:4px solid var(--accent);padding:10px 14px;border-radius:4px;margin-top:14px">
+            <div style="font-size:14px;font-weight:700;margin-bottom:6px">💡 可行的調整方案</div>
+            ${suggestions.map(t => `<div style="font-size:13px;margin-bottom:6px">• ${t}</div>`).join('')}
+            <div style="font-size:12px;color:var(--fg3);margin-top:8px">各方案可能互相影響，建議一次只採用一項，與醫師確認後修改回覆，再重新排班。</div></div>` : ''}
           <p style="margin-top:14px;font-size:13px;color:var(--fg3)">建議：請相關醫師調整不值班日期，或調整秘書設定的固定指派後重新排班，也可以在班表中手動調整。</p>
         </div>
         <div class="modal-footer">
