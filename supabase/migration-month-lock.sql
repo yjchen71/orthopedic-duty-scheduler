@@ -4,6 +4,7 @@ create table if not exists month_locks (
   locked_at timestamptz not null default now()
 );
 alter table month_locks enable row level security;
+drop policy if exists secretary_all on month_locks;
 create policy secretary_all on month_locks for all to authenticated using (true) with check (true);
 grant select, insert, update, delete on table month_locks to authenticated;
 

@@ -45,6 +45,7 @@ create table if not exists pin_attempts (
 );
 alter table doctor_pins  enable row level security;
 alter table pin_attempts enable row level security;
+drop policy if exists secretary_all on doctor_pins;
 create policy secretary_all on doctor_pins for all to authenticated using (true) with check (true);
 -- pin_attempts has no policy on purpose: only the security-definer functions below touch it.
 grant select, insert, update, delete on table doctor_pins to authenticated;
@@ -56,9 +57,13 @@ alter table app_state enable row level security;
 
 -- Only signed-in users (the secretary) can touch tables directly.
 -- Turn OFF "Allow new users to sign up" so nobody else can become one.
+drop policy if exists secretary_all on doctors;
 create policy secretary_all on doctors   for all to authenticated using (true) with check (true);
+drop policy if exists secretary_all on replies;
 create policy secretary_all on replies   for all to authenticated using (true) with check (true);
+drop policy if exists secretary_all on month_locks;
 create policy secretary_all on month_locks for all to authenticated using (true) with check (true);
+drop policy if exists secretary_all on app_state;
 create policy secretary_all on app_state for all to authenticated using (true) with check (true);
 
 -- Newer Supabase projects do not expose new tables to the API automatically.
