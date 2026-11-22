@@ -940,7 +940,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-view';
+const APP_VERSION = '2026-11-22-trauma';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -1867,6 +1867,76 @@ async function renderDoctorReply() {
 }
 
 // ─── Secretary Settings ───────────────────────────────────────────────────────
+// ─── Trauma picker: dropdown (3 Trauma doctors only) + click dates, same as 指定排班 ─────
+let _traumaPerson = '';
+function traumaPickerHTML(ctx) {
+  const {year, month} = state.currentMonth;
+  const key = `${year}-${month}`;
+  const ss = state.secretarySettings;
+  const map = ss.traumaPreset?.[key] || {};
+  const wardDays = ss.wardPreset?.[key] || [];
+  const days = new Date(year, month, 0).getDate();
+  if (!TRAUMA_STAFF.includes(_traumaPerson)) _traumaPerson = TRAUMA_STAFF[0];
+  const headers = ['日','一','二','三','四','五','六'].map(h =>
+    `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3);padding:3px 0">${h}</div>`).join('');
+  const blanks = Array.from({length: new Date(year, month - 1, 1).getDay()}, () => '<div></div>').join('');
+  const cells = Array.from({length: days}, (_, i) => {
+    const d = i + 1, dow = new Date(year, month - 1, d).getDay(), who = map[d];
+    const wardBlocked = !who && wardDays.includes(d);
+    const hol = isHoliday(year, month, d);
+    let bg = hol ? 'var(--surface2)' : 'var(--surface)', color = 'var(--fg)', border = 'var(--border)', extra = '';
+    if (who) { bg = 'var(--accent)'; color = '#fff'; border = 'var(--accent)'; }
+    if (wardBlocked) { bg = 'var(--warn-light)'; color = 'var(--warn)'; extra = 'opacity:.6;cursor:default;'; }
+    return `<button ${wardBlocked ? 'disabled' : `onclick="clickTraumaDay('${ctx}',${d})"`}
+      title="${month}/${d}（${DOW[dow]}）${who ? ' → ' + who : ''}${wardBlocked ? ' 已指定為 Ward 班' : ''}"
+      style="width:100%;aspect-ratio:1;padding:0;font-size:11px;border-radius:var(--radius-sm);border:1.5px solid ${border};cursor:pointer;background:${bg};color:${color};line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;${extra}">
+      <span>${d}</span>${who ? `<span style="font-size:9px;max-width:100%;overflow:hidden;white-space:nowrap;padding:0 2px">${who}</span>` : ''}
+    </button>`;
+  }).join('');
+  const summary = Object.entries(map).sort((a, b) => +a[0] - +b[0])
+    .map(([d, n]) => `<span class="chip chip-blue">${month}/${d}→${n}</span>`).join(' ');
+  const counts = TRAUMA_STAFF.map(n => `${n} ${Object.values(map).filter(x => x === n).length}`).join('、');
+  return `
+    <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start">
+      <div>
+        <div style="max-width:360px;margin-bottom:10px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${headers}${blanks}${cells}</div></div>
+        <div style="font-size:13px;min-height:30px">${summary || '<span style="color:var(--fg3)">（尚未指定）</span>'}</div>
+        ${Object.keys(map).length ? `<div style="font-size:12px;color:var(--fg3);margin-top:6px">共 ${Object.keys(map).length} 天（${counts}）</div>` : ''}
+      </div>
+      <div style="min-width:140px">
+        <div class="form-label" style="margin-bottom:6px">選擇人員</div>
+        <select id="trauma-person-${ctx}" onchange="_traumaPerson=this.value"
+          style="width:100%;padding:6px 8px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--surface);color:var(--fg);font-size:13px">
+          ${TRAUMA_STAFF.map(n => `<option value="${n}" ${n === _traumaPerson ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--fg3);margin-top:6px">點選日期即指定上方人員；再點一次同一格取消指定。橘色＝已是 Ward 日。</div>
+        <button onclick="clearTraumaDays()" style="margin-top:10px;width:100%;padding:5px 0;border-radius:var(--radius-sm);border:1.5px solid var(--danger);background:transparent;color:var(--danger);cursor:pointer;font-size:12px">清除全部</button>
+      </div>
+    </div>`;
+}
+function refreshTraumaPickers() {
+  const box = document.getElementById('trauma-picker-dialog');
+  if (box) box.innerHTML = traumaPickerHTML('dialog');
+  if (currentPage === 'secretary-settings') renderSecretarySettings();
+}
+window.clickTraumaDay = function(ctx, d) {
+  const {year, month} = state.currentMonth, key = `${year}-${month}`;
+  const sel = document.getElementById('trauma-person-' + ctx);
+  if (sel) _traumaPerson = sel.value;
+  const ss = state.secretarySettings;
+  if (!ss.traumaPreset) ss.traumaPreset = {};
+  if (!ss.traumaPreset[key]) ss.traumaPreset[key] = {};
+  const map = ss.traumaPreset[key];
+  if (map[d]) delete map[d]; else if (TRAUMA_STAFF.includes(_traumaPerson)) map[d] = _traumaPerson;
+  saveState(); refreshTraumaPickers();
+};
+window.clearTraumaDays = function() {
+  const {year, month} = state.currentMonth;
+  if (!confirm('確定清除本月所有 Trauma 指定？')) return;
+  state.secretarySettings.traumaPreset[`${year}-${month}`] = {};
+  saveState(); refreshTraumaPickers();
+};
+
 function renderSecretarySettings() {
   const el = document.getElementById('page-secretary-settings');
   const {year, month} = state.currentMonth;
@@ -1874,6 +1944,13 @@ function renderSecretarySettings() {
   const daysInMonth = new Date(year, month, 0).getDate();
   if (!state.secretarySettings) state.secretarySettings = {traumaPreset:{},wardPreset:{},fixedAssign:{},holidays:{},extraWorkdays:{}};
   const ss = state.secretarySettings;
+  const oldFixedTrauma = ss.fixedAssign?.[key]?.trauma;      // legacy: merge into the single Trauma list
+  if (oldFixedTrauma && Object.keys(oldFixedTrauma).length) {
+    if (!ss.traumaPreset) ss.traumaPreset = {};
+    ss.traumaPreset[key] = {...oldFixedTrauma, ...(ss.traumaPreset[key] || {})};
+    ss.fixedAssign[key].trauma = {};
+    saveState();
+  }
   const traumaPreset = ss.traumaPreset?.[key] || {};
   const extraHolidays = ss.holidays?.[key] || [];
   const extraWorkdays = ss.extraWorkdays?.[key] || [];
@@ -1942,27 +2019,13 @@ function renderSecretarySettings() {
       <!-- Trauma 預設 -->
       <div class="card">
         <div class="card-header">
-          <h2>🩺 Trauma 班預設（${year}年${month}月）</h2>
+          <h2>🩺 Trauma 班指定（${year}年${month}月）</h2>
         </div>
-        <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div>
-            <div class="form-label">Trauma 指定（格式：日期:姓名，每行一個）</div>
-            <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">可用人員：${TRAUMA_STAFF.join('、')}</div>
-            <textarea id="trauma-preset-input" rows="8" style="width:100%;font-size:13px;font-family:monospace;resize:vertical"
-              placeholder="例如：&#10;9:李宗霖&#10;22:陳勇璋&#10;23:王俊量">${traumaLines}</textarea>
-            <button class="btn btn-primary" onclick="saveTraumaPreset()" style="margin-top:10px">儲存 Trauma 預設</button>
+        <div class="card-body">
+          <div style="font-size:13px;color:var(--fg2);margin-bottom:12px">
+            選擇醫師後點選日期即可指定（僅 ${TRAUMA_STAFF.join('、')}）。這裡的指定會直接用於自動排班。
           </div>
-          <div>
-            <div class="form-label">目前預設</div>
-            <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;font-size:13px;min-height:120px">
-              ${Object.keys(traumaPreset).length === 0
-                ? '<span style="color:var(--fg3)">（尚未設定）</span>'
-                : Object.entries(traumaPreset).sort((a,b)=>+a[0]-+b[0]).map(([d,n]) => {
-                    const dow = new Date(year, month-1, +d).getDay();
-                    return `<div>${month}/${d}（${DOW[dow]}）→ <strong>${n}</strong></div>`;
-                  }).join('')}
-            </div>
-          </div>
+          <div id="trauma-picker-settings">${traumaPickerHTML('settings')}</div>
         </div>
       </div>
 
@@ -2045,13 +2108,13 @@ function renderSecretarySettings() {
         </div>
         <div class="card-body">
           <div style="font-size:13px;color:var(--fg2);margin-bottom:14px">
-            指定特定日期由特定人員排班。指定的班別計入當月總班數，系統會依此平均分配其餘班次。<br>
+            指定 ER／Ward 特定日期由特定人員排班（Trauma 請用上方的「Trauma 班指定」）。指定的班別計入當月總班數，系統會依此平均分配其餘班次。<br>
             <span style="font-size:12px;color:var(--fg3)">注意：指定 ER 班時，若該天已為 Trauma/Ward 耦合日，指定會被忽略。</span>
           </div>
 
           <!-- Tabs for type selection -->
           <div style="display:flex;gap:8px;margin-bottom:14px" id="fixed-assign-tabs">
-            ${['er','trauma','ward'].map((t,i) => {
+            ${['er','ward'].map((t,i) => {
               const labels = {er:'🚨 ER',trauma:'🩺 Trauma',ward:'🏥 Ward'};
               return `<button onclick="setFixedTab('${t}')" id="fixed-tab-${t}"
                 style="padding:6px 14px;border-radius:var(--radius-sm);border:1.5px solid var(--border);cursor:pointer;font-size:13px;font-weight:600;background:${i===0?'var(--accent)':'var(--surface)'};color:${i===0?'#fff':'var(--fg)'}">
@@ -2067,7 +2130,7 @@ function renderSecretarySettings() {
               trauma: TRAUMA_STAFF,
               ward: WARD_STAFF,
             };
-            return ['er','trauma','ward'].map((type, ti) => {
+            return ['er','ward'].map((type, ti) => {
               const fixedMap = fixedAll[type] || {};
               const firstDow = new Date(year, month-1, 1).getDay();
               const headers = ['日','一','二','三','四','五','六'].map(h =>
@@ -2146,26 +2209,6 @@ function renderSecretarySettings() {
     renderSecretarySettings();
   };
 
-  window.saveTraumaPreset = function() {
-    const raw = document.getElementById('trauma-preset-input').value.trim();
-    const preset = {};
-    for (const line of raw.split('\n')) {
-      const t = line.trim(); if (!t) continue;
-      const [d,n] = t.split(':');
-      const day = parseInt(d);
-      const name = n?.trim();
-      if (!day || !name || !TRAUMA_STAFF.includes(name)) {
-        showToast(`⚠️ 格式錯誤：「${t}」`); return;
-      }
-      preset[day] = name;
-    }
-    if (!state.secretarySettings.traumaPreset) state.secretarySettings.traumaPreset = {};
-    state.secretarySettings.traumaPreset[key] = preset;
-    saveState();
-    showToast('✅ Trauma 預設已儲存');
-    renderSecretarySettings();
-  };
-
   window.toggleExtraHoliday = function(d) {
     if (!state.secretarySettings.holidays) state.secretarySettings.holidays = {};
     if (!state.secretarySettings.holidays[key]) state.secretarySettings.holidays[key] = [];
@@ -2188,7 +2231,7 @@ function renderSecretarySettings() {
 
   // ── Fixed assign handlers ──
   window.setFixedTab = function(type) {
-    ['er','trauma','ward'].forEach(t => {
+    ['er','ward'].forEach(t => {
       const tab = document.getElementById('fixed-tab-'+t);
       const panel = document.getElementById('fixed-panel-'+t);
       if (tab) { tab.style.background = t===type ? 'var(--accent)' : 'var(--surface)'; tab.style.color = t===type ? '#fff' : 'var(--fg)'; }
@@ -2558,13 +2601,11 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
         </div>
 
         <div>
-          <div class="form-label">Trauma 班指定（格式：日期:人名，每行一個）</div>
-          <div style="font-size:12px;color:var(--fg3);margin-bottom:6px">
-            可用人員：${TRAUMA_STAFF.join('、')}
-            ${traumaPrefill ? ' <span style="color:var(--success)">✓ 已從秘書設定預填</span>' : ''}
+          <div class="form-label">Trauma 班指定</div>
+          <div style="font-size:12px;color:var(--fg3);margin-bottom:8px">
+            選擇醫師後點選日期（僅 ${TRAUMA_STAFF.join('、')}）；與「秘書設定」頁同步。
           </div>
-          <textarea id="trauma-input" rows="7" style="width:100%;font-size:13px;font-family:monospace"
-            placeholder="例如：&#10;9:李宗霖&#10;22:陳勇璋&#10;23:王俊量">${traumaPrefill}</textarea>
+          <div id="trauma-picker-dialog">${traumaPickerHTML('dialog')}</div>
         </div>
 
         <div>
@@ -2654,29 +2695,16 @@ function rebalanceHolidayShifts(sched, movable, people, offMap, daysOf, isHol) {
 }
 
 function executeAutoSchedule(year, month, daysInMonth, key) {
-  const traumaRaw = document.getElementById('trauma-input').value.trim();
   const wardRaw   = document.getElementById('ward-input').value.trim();
   const wardDaysCount = parseInt(document.getElementById('ward-days-count').value) || 12;
   const errEl = document.getElementById('schedule-error');
   errEl.style.display = 'none';
 
-  // Parse trauma
+  // Trauma comes from the picker (秘書設定 → Trauma 班指定)
   const traumaSched = {}; // {day: name}
-  if (traumaRaw) {
-    for (const line of traumaRaw.split('\n')) {
-      const t = line.trim();
-      if (!t) continue;
-      const [d, n] = t.split(':');
-      const day = parseInt(d);
-      const name = n?.trim();
-      if (!day || !name || !TRAUMA_STAFF.includes(name)) {
-        errEl.textContent = `Trauma 格式錯誤或人員不符：「${t}」（只能是 ${TRAUMA_STAFF.join('、')}）`;
-        errEl.style.display = '';
-        return;
-      }
-      traumaSched[day] = name;
-    }
-  }
+  Object.entries(state.secretarySettings?.traumaPreset?.[key] || {}).forEach(([d, n]) => {
+    if (TRAUMA_STAFF.includes(n)) traumaSched[+d] = n;
+  });
 
   // Parse ward (optional) — format: just day numbers (name auto-assigned) or day:name
   // wardDaysList: days to assign ward (name=null means auto-assign)
