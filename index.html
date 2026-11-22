@@ -1446,7 +1446,7 @@ function renderReplies() {
 function getFillLink() {
   const {year, month} = state.currentMonth;
   const base = location.origin + location.pathname;
-  return `${base}#fill-${year}-${String(month).padStart(2,'0')}`;
+  return `${base}?year=${year}&month=${String(month).padStart(2,'0')}`;
 }
 
 window.copyFillLink = function(btn) {
