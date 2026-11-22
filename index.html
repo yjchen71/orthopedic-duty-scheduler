@@ -980,6 +980,7 @@ async function saveReply(name, offDays, preferDays) {
   const {error} = await sb.rpc('submit_reply', {
     p_month: monthKey, p_name: name, p_off: offDays, p_prefer: preferDays });
   if (error) throw error;
+  dbReplies[name] = {offDays, preferDays, submittedAt: Date.now()};   // so 「修改我的填寫」 shows what was just saved
   if (_isSecretary) loadReplies(monthKey);
 }
 
