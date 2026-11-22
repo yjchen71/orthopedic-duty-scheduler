@@ -939,7 +939,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-22-erhol';
+const APP_VERSION = '2026-11-22-pin';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -997,22 +997,70 @@ function subscribeReplies(monthKey) {
     .subscribe();
 }
 
+const PIN_MSG = {
+  bad_pin: '❌ PIN 碼錯誤，請再確認',
+  locked_out: '🔒 錯誤次數過多，請 15 分鐘後再試，或聯絡秘書',
+  no_pin: '⚠️ 尚未設定 PIN 碼，請聯絡秘書',
+};
+let _doctorPin = '';          // PIN the doctor typed this session (sent with each submit)
+
 async function saveReply(name, offDays, preferDays) {
   const monthKey = getMonthKey(state._fillMonthOverride?.year, state._fillMonthOverride?.month);
-  const {error} = await sb.rpc('submit_reply', {
-    p_month: monthKey, p_name: name, p_off: offDays, p_prefer: preferDays });
+  const {data, error} = await sb.rpc('submit_reply', {
+    p_month: monthKey, p_name: name, p_off: offDays, p_prefer: preferDays, p_pin: _isSecretary ? null : _doctorPin });
   if (error) throw error;
+  if (data !== 'ok') { const e = new Error(data); e.code = data; throw e; }
   dbReplies[name] = {offDays, preferDays, submittedAt: Date.now()};   // so 「修改我的填寫」 shows what was just saved
   if (_isSecretary) loadReplies(monthKey);
 }
 
-// Doctor side: fetch one's own previous reply (anonymous RPC)
-async function fetchMyReply(name) {
+// Doctor side: verify PIN and fetch one's own previous reply. Returns {status, offDays, preferDays}.
+async function fetchMyReply(name, pin) {
   const monthKey = getMonthKey(state._fillMonthOverride?.year, state._fillMonthOverride?.month);
-  const {data, error} = await sb.rpc('get_reply', {p_month: monthKey, p_name: name});
-  if (error || !data || !data.length) return null;
-  return {offDays: data[0].off_days || [], preferDays: data[0].prefer_days || []};
+  const {data, error} = await sb.rpc('get_reply', {p_month: monthKey, p_name: name, p_pin: pin});
+  if (error || !data) return {status: 'error'};
+  return {status: data.status, offDays: data.off_days || [], preferDays: data.prefer_days || []};
 }
+
+// Secretary side: manage doctors' PINs
+let pinsByName = {};
+let _pinsLoaded = false;
+async function loadPins() {
+  const {data, error} = await sb.from('doctor_pins').select('*');
+  if (error) { showToast('⚠️ 讀取 PIN 失敗：' + error.message); return; }
+  pinsByName = {}; data.forEach(r => { pinsByName[r.name] = r.pin; });
+  _pinsLoaded = true;
+}
+async function setDoctorPin(name, pin) {
+  if (!/^\d{5}$/.test(pin)) { showToast('⚠️ PIN 必須是 5 位數字'); return false; }
+  await sb.from('doctors').upsert({name, sort_order: state.staff.findIndex(s => s.id === name)});  // make sure the doctor row exists
+  const {error} = await sb.from('doctor_pins').upsert({name, pin});
+  if (error) { showToast('⚠️ 儲存 PIN 失敗：' + error.message); return false; }
+  pinsByName[name] = pin; return true;
+}
+function randomPin() {
+  const a = new Uint32Array(1); crypto.getRandomValues(a);
+  return String(a[0] % 100000).padStart(5, '0');
+}
+window.genPin = async function(i) {
+  const name = state.staff[i].id;
+  if (pinsByName[name] && !confirm(`${name} 已有 PIN，要重新產生嗎？舊的 PIN 會失效。`)) return;
+  if (await setDoctorPin(name, randomPin())) renderStaff();
+};
+window.editPin = async function(i, v) {
+  const name = state.staff[i].id; v = v.trim();
+  if (v === (pinsByName[name] || '')) return;
+  if (!(await setDoctorPin(name, v))) renderStaff();
+};
+window.genMissingPins = async function() {
+  let n = 0;
+  for (const s of state.staff) if (!pinsByName[s.id]) { if (await setDoctorPin(s.id, randomPin())) n++; }
+  showToast(n ? `✅ 已為 ${n} 位醫師產生 PIN` : '所有醫師都已有 PIN'); renderStaff();
+};
+window.copyPinList = function() {
+  const text = state.staff.map(s => `${s.id}：${pinsByName[s.id] || '（尚未設定）'}`).join('\n');
+  navigator.clipboard?.writeText(text).then(() => showToast('📋 已複製 PIN 清單（請私下個別通知，勿貼到群組）'));
+};
 
 async function deleteReply(name) {
   const monthKey = getMonthKey();
@@ -1495,7 +1543,7 @@ window.copyFillLink = function(btn) {
 window.copyLineMsg = function() {
   const {year, month} = state.currentMonth;
   const link = getFillLink();
-  const text = `【${year}年${month}月值班填寫通知】\n\n請點選以下連結，填寫本月無法值班的日期：\n${link}\n\n開啟後請選擇自己的姓名再填寫。\n\n填寫限制：\n・每月至少保留 10 天可值班\n・假日中至少 1 天可值班\n\n請於三日內完成填寫，謝謝！`;
+  const text = `【${year}年${month}月值班填寫通知】\n\n請點選以下連結，填寫本月無法值班的日期：\n${link}\n\n開啟後請選擇自己的姓名，並輸入個人 5 碼 PIN（由秘書另行通知）再填寫。\n\n填寫限制：\n・每月至少保留 10 天可值班\n・假日中至少 1 天可值班\n\n請於三日內完成填寫，謝謝！`;
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById('copy-msg-btn');
     if (btn) { btn.textContent = '✅ 已複製！'; setTimeout(() => { btn.textContent = '💬 複製含說明的訊息'; }, 2000); }
@@ -1569,6 +1617,8 @@ async function renderDoctorReply() {
   let selectedDays = new Set(existingReply);
   let preferDays = new Set(existingPrefer);
   let selectedName = editingAs || '';
+  let verified = !urlMode;     // doctors must enter their PIN first; secretary editing skips it
+  let pinError = '';
 
   // Count holidays for this month using isHoliday()
   function getHolidayDays() {
@@ -1587,7 +1637,45 @@ async function renderDoctorReply() {
     return {availDays, availHolidays, offArr, holidays};
   }
 
+  function renderPinGate() {
+    el.innerHTML = `
+      <div class="reply-header">
+        <h1>填寫不值班日期</h1>
+        <p>${year}年${month}月 值班意願回覆</p>
+      </div>
+      <div class="reply-body">
+        <div class="form-group">
+          <label class="form-label">請選擇您的姓名</label>
+          <select id="reply-name-sel" onchange="handleNameChange(this.value)" style="font-size:16px">
+            <option value="">── 請選擇 ──</option>
+            ${state.staff.map(s => `<option value="${s.id}" ${selectedName===s.id?'selected':''}>${s.id}</option>`).join('')}
+          </select>
+        </div>
+        ${selectedName ? `<div class="form-group">
+          <label class="form-label">請輸入您的 5 碼 PIN</label>
+          <input id="doctor-pin" type="password" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="●●●●●"
+            style="font-size:22px;letter-spacing:8px;text-align:center"
+            onkeydown="if(event.key==='Enter')verifyDoctorPin()">
+          <div style="color:var(--danger);font-size:13px;min-height:20px;margin-top:6px">${pinError}</div>
+          <div style="font-size:12px;color:var(--fg3);margin-top:4px">PIN 由秘書提供，忘記請聯絡秘書。</div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px" onclick="verifyDoctorPin()">確認</button>
+        </div>` : ''}
+      </div>`;
+    window.handleNameChange = function(v) { selectedName = v; pinError = ''; renderPinGate(); };
+    window.verifyDoctorPin = async function() {
+      const pin = (document.getElementById('doctor-pin')?.value || '').trim();
+      if (!/^\d{5}$/.test(pin)) { pinError = '請輸入 5 位數字'; renderPinGate(); return; }
+      const r = await fetchMyReply(selectedName, pin);
+      if (r.status !== 'ok') { pinError = PIN_MSG[r.status] || '⚠️ 驗證失敗，請稍後再試'; renderPinGate(); return; }
+      _doctorPin = pin;
+      selectedDays = new Set(r.offDays); preferDays = new Set(r.preferDays);
+      verified = true; pinError = '';
+      render();
+    };
+  }
+
   function render() {
+    if (!verified) { renderPinGate(); return; }
     const {availDays, availHolidays, offArr, holidays} = calcStats();
     const needsWarning = selectedName && (availDays < 10 || availHolidays.length < 1);
     const canSubmit = !needsWarning;
@@ -1714,12 +1802,9 @@ async function renderDoctorReply() {
       </div>
     `;
 
-    window.handleNameChange = async function(v) {
+    window.handleNameChange = function(v) {
       selectedName = v;
-      if (urlMode && v) {
-        const mine = await fetchMyReply(v);
-        if (mine) dbReplies[v] = mine;
-      }
+      if (urlMode) { verified = false; _doctorPin = ''; pinError = ''; selectedDays = new Set(); preferDays = new Set(); render(); return; }
       selectedDays = new Set(getReplies()[v]?.offDays || []);
       preferDays = new Set(getReplies()[v]?.preferDays || []);
       render();
@@ -1751,7 +1836,8 @@ async function renderDoctorReply() {
         [...preferDays].sort((a,b) => a-b)
       );
     } catch(e) {
-      if (/locked/i.test(e.message || '')) { renderDoctorReply(); return; }
+      if (e.code === 'month_locked') { renderDoctorReply(); return; }
+      if (e.code && PIN_MSG[e.code]) { showToast(PIN_MSG[e.code]); return; }
       showToast('⚠️ 儲存失敗，請重試');
       console.error('submitReply error', e);
       return;
@@ -3165,6 +3251,10 @@ function renderStaff() {
     <div class="card">
       <div class="card-header">
         <h2>人員名單</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-secondary" onclick="genMissingPins()">為未設定者產生 PIN</button>
+          <button class="btn btn-sm btn-secondary" onclick="copyPinList()">複製 PIN 清單</button>
+        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -3172,7 +3262,7 @@ function renderStaff() {
             <th>#</th>
             <th>姓名</th>
             <th>Email</th>
-            <th>操作</th>
+            <th>PIN（5碼）</th>
           </tr></thead>
           <tbody id="staff-tbody">
             ${state.staff.map((s, i) => `
@@ -3184,15 +3274,21 @@ function renderStaff() {
                     onchange="updateStaffEmail(${i}, this.value)"
                     style="width:100%;max-width:220px;font-size:12px;padding:4px 8px">
                 </td>
-                <td>—</td>
+                <td style="white-space:nowrap">
+                  <input type="text" inputmode="numeric" maxlength="5" value="${pinsByName[s.id] || ''}" placeholder="尚未設定"
+                    onchange="editPin(${i}, this.value)"
+                    style="width:90px;font-size:14px;letter-spacing:3px;padding:4px 8px;text-align:center;font-family:var(--mono)">
+                  <button class="btn btn-sm btn-secondary" onclick="genPin(${i})">產生</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       </div>
     </div>
-    <p style="font-size:12px;color:var(--fg3);margin-top:10px;padding:0 2px">Email 欄位可直接編輯，修改後自動儲存。</p>
+    <p style="font-size:12px;color:var(--fg3);margin-top:10px;padding:0 2px">Email 欄位可直接編輯，修改後自動儲存。PIN 可手動輸入或按「產生」，請私下個別通知醫師。醫師連續輸錯 5 次會鎖定 15 分鐘。</p>
   `;
+  if (_isSecretary && !_pinsLoaded) loadPins().then(() => { if (currentPage === 'staff') renderStaff(); });
 }
 
 window.updateStaffEmail = function(i, val) {
