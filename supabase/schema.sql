@@ -35,6 +35,11 @@ create policy secretary_all on doctors   for all to authenticated using (true) w
 create policy secretary_all on replies   for all to authenticated using (true) with check (true);
 create policy secretary_all on app_state for all to authenticated using (true) with check (true);
 
+-- Newer Supabase projects do not expose new tables to the API automatically.
+-- Grant table privileges to signed-in users only (never to anon).
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on table doctors, replies, app_state to authenticated;
+
 -- Doctors are anonymous: they only get these narrow functions.
 create or replace function list_doctors()
 returns table(name text) language sql security definer set search_path = public as
