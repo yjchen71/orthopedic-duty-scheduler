@@ -940,7 +940,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-24-holstats';
+const APP_VERSION = '2026-11-24-rules';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2619,7 +2619,9 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
           <strong>排班規則：</strong><br>
           • Trauma 班由 <strong>${TRAUMA_STAFF.join('、')}</strong> 負責<br>
           • Ward 班由 <strong>${WARD_STAFF.join('、')}</strong> 平均分擔<br>
-          • ER 班每天一人（10人平衡），Trauma/Ward 日 ER 由同人承擔
+          • ER 班每天一人（10人平衡），Trauma/Ward 日 ER 由同人承擔<br>
+          • 非二月：每人 ER 至少 3 班；沒有 ER 假日班者，優先排到 4 班（不影響他人的 3 班下限）<br>
+          • Ward 兩班者，兩班皆為平日；假日 Ward 只給 Ward 僅 1 班者
         </div>
 
         <div>
@@ -2726,6 +2728,55 @@ function rebalanceHolidayShifts(sched, movable, people, offMap, daysOf, isHol) {
           daysOf[donor] = dd.concat(e); daysOf[rec] = rd.concat(d);
           moved = true; break outer;
         }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+// Rule: anyone with 2+ Ward shifts must have only weekday Ward shifts (holiday Ward goes to people with a single Ward shift).
+// Swaps a holiday Ward day of a 2+ person with a weekday Ward day of a 1-shift person.
+function enforceWeekdayWard(sched, movable, people, offMap, daysOf, isHol) {
+  for (let g = 0; g < 300; g++) {
+    let moved = false;
+    outer:
+    for (const donor of people) {
+      if (daysOf[donor].length < 2) continue;
+      for (const h of daysOf[donor].filter(d => isHol(d) && movable.includes(d))) {
+        for (const rec of people) {
+          if (rec === donor || daysOf[rec].length > 1) continue;
+          for (const e of daysOf[rec].filter(d => !isHol(d) && movable.includes(d))) {
+            if (offMap[rec]?.has(h) || offMap[donor]?.has(e)) continue;
+            const dd = daysOf[donor].filter(x => x !== h), rd = daysOf[rec].filter(x => x !== e);
+            if (rd.includes(h - 1) || rd.includes(h + 1) || dd.includes(e - 1) || dd.includes(e + 1)) continue;
+            sched[h] = rec; sched[e] = donor;
+            daysOf[donor] = dd.concat(e); daysOf[rec] = rd.concat(h);
+            moved = true; break outer;
+          }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+// Rule: someone with no holiday ER shift should preferably have 4 ER shifts in total.
+// Moves a weekday free ER day to them, but only from people who stay at or above floorLoad (the monthly minimum).
+function giveExtraToNoHoliday(sched, movable, people, offMap, load, daysOf, isHol, floorLoad, target) {
+  for (let g = 0; g < 200; g++) {
+    const needy = people.filter(n => !daysOf[n].some(isHol) && load[n] < target).sort((a, b) => load[a] - load[b]);
+    let moved = false;
+    outer:
+    for (const P of needy) {
+      for (const Q of [...people].sort((a, b) => load[b] - load[a])) {
+        if (Q === P || load[Q] - 1 < floorLoad || load[Q] <= load[P]) continue;
+        if (!daysOf[Q].some(isHol) && load[Q] <= target) continue;      // don't take from another no-holiday person
+        const cand = movable.find(d => sched[d] === Q && !isHol(d) && !offMap[P]?.has(d)
+          && !daysOf[P].includes(d - 1) && !daysOf[P].includes(d + 1));
+        if (cand === undefined) continue;
+        sched[cand] = P; load[Q]--; load[P]++;
+        daysOf[Q] = daysOf[Q].filter(x => x !== cand); daysOf[P].push(cand);
+        moved = true; break outer;
       }
     }
     if (!moved) break;
@@ -2895,7 +2946,7 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     WARD_STAFF.forEach(n => { wDays[n] = []; });
     Object.entries(wardSched).forEach(([day, name]) => { wDays[name]?.push(parseInt(day)); });
     rebalanceDays(wardSched, autoWardDays, WARD_STAFF, offMap, wardCount, wDays, preferMapW);
-    rebalanceHolidayShifts(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
+    enforceWeekdayWard(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
   }
 
   const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
@@ -3005,6 +3056,9 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
   // Third pass: spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
   rebalanceHolidayShifts(erSched, freeDays, state.staff.map(s => s.id), offMap2, erDaysOfPerson, isHol);
+  // Fourth pass: people without a holiday ER shift get the extra (4th) weekday ER shift first, never pushing anyone below the minimum
+  giveExtraToNoHoliday(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
+                       Math.floor(daysInMonth / state.staff.length), 4);
 
   // ── Build final schedule object ──
   const sched = {};
@@ -3106,10 +3160,19 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
       <span style="color:var(--fg3)">${allNames.filter(n => erHolOf(n) > lo + 1).join('、')} 的假日班較多，可能因為 Trauma/Ward 假日班已連帶排入 ER，或其他人假日有預假、連續日限制而無法互換。</span></div>`);
   }
   const wardHolOf = n => Object.entries(sched).filter(([k, v]) => v.Ward === n && isHol(+k)).length;
-  if (Object.keys(wardSched).length > 0 && spread(WARD_STAFF, wardHolOf) > 1) {
-    imbalance.push(`<div style="font-weight:700;margin:10px 0 4px">Ward 假日班不平均</div>
-      <div style="font-size:13px">${WARD_STAFF.map(n => `${n} ${wardHolOf(n)}`).join('、')}<br>
-      <span style="color:var(--fg3)">可能原因：固定指派，或預假、連續日限制使假日班無法互換。</span></div>`);
+  const wardBad = WARD_STAFF.filter(n => wdOf(n) >= 2 && wardHolOf(n) > 0);
+  if (wardBad.length) {
+    imbalance.push(`<div style="font-weight:700;margin:10px 0 4px">Ward：兩班以上者含假日班（規則：兩班皆應為平日）</div>
+      <div style="font-size:13px">${wardBad.map(n => `${n}（Ward ${wdOf(n)} 班，其中假日 ${wardHolOf(n)} 班）`).join('、')}<br>
+      <span style="color:var(--fg3)">假日 Ward 只能給「Ward 僅 1 班」的醫師。本月指定的假日 Ward 天數可能太多，或受預假、固定指派限制。可減少假日 Ward 日期後重排。</span></div>`);
+  }
+  if (month !== 2) {
+    const low = allNames.filter(n => erOf(n) < 3);
+    if (low.length) {
+      imbalance.push(`<div style="font-weight:700;margin:10px 0 4px">ER 班數不足 3 班（非二月，每人至少 3 班）</div>
+        <div style="font-size:13px">${low.map(n => `${n} ${erOf(n)} 班`).join('、')}<br>
+        <span style="color:var(--fg3)">可能原因：預假過多或連續日限制使其無法再排入，請參考下方建議。</span></div>`);
+    }
   }
   const consecPairs = [];
   for (let d = 1; d < daysInMonth; d++) {
