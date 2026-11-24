@@ -940,7 +940,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-24-holiday';
+const APP_VERSION = '2026-11-24-holstats';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2349,12 +2349,25 @@ function renderSchedule() {
   });
   const shiftCount = {};
   state.staff.forEach(s => { shiftCount[s.id] = erCount[s.id] + wardCount[s.id] + traumaCount[s.id]; });
+  // Holiday shifts (Sat/Sun/national holidays, minus make-up workdays)
+  const erHol = {}, wardHol = {};
+  state.staff.forEach(s => { erHol[s.id] = 0; wardHol[s.id] = 0; });
+  let holidayTotal = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (!isHoliday(year, month, d)) continue;
+    holidayTotal++;
+    const sh = sched[d] || {};
+    if (sh.ER && erHol[sh.ER] !== undefined) erHol[sh.ER]++;
+    if (sh.Ward && wardHol[sh.Ward] !== undefined) wardHol[sh.Ward]++;
+  }
+  const holChip = c => `<div style="font-weight:700;font-size:16px;border-radius:6px;padding:4px 8px;display:inline-block;background:var(--warn-light);color:var(--warn);border:1px solid var(--warn)">${c}</div>`;
 
   el.innerHTML = `
     <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <span style="font-size:15px;font-weight:700">${year}年${month}月班表</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${SHIFTS.map(s => `<span class="chip ${SHIFT_CLASS[s] ? 'slot '+SHIFT_CLASS[s] : 'chip-gray'}" style="border-radius:4px">${s}</span>`).join('')}
+        <span class="chip" style="border-radius:4px;background:var(--warn-light);color:var(--warn);border:1px solid var(--warn)">假日</span>
       </div>
     </div>
 
@@ -2378,6 +2391,14 @@ function renderSchedule() {
           </div>
         </div>
         <div>
+          <div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px;letter-spacing:.05em">
+            ER 假日班（本月假日 ${holidayTotal} 天，共${Object.values(erHol).reduce((a,b)=>a+b,0)}班）
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            ${state.staff.map(s => `<div style="text-align:center;min-width:48px">${holChip(erHol[s.id] || 0)}<div style="font-size:11px;color:var(--fg2);margin-top:2px">${s.id}</div></div>`).join('')}
+          </div>
+        </div>
+        <div>
           <div style="font-size:12px;font-weight:600;color:var(--fg3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">
             Ward 班（7人，共${Object.values(wardCount).reduce((a,b)=>a+b,0)}天）
           </div>
@@ -2389,6 +2410,14 @@ function renderSchedule() {
                 <div style="font-size:11px;color:var(--fg2);margin-top:2px">${name}</div>
               </div>`;
             }).join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px;letter-spacing:.05em">
+            Ward 假日班（本月假日 ${holidayTotal} 天，共${Object.values(wardHol).reduce((a,b)=>a+b,0)}班）
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            ${WARD_STAFF.map(name => `<div style="text-align:center;min-width:48px">${holChip(wardHol[name] || 0)}<div style="font-size:11px;color:var(--fg2);margin-top:2px">${name}</div></div>`).join('')}
           </div>
         </div>
         <div>
@@ -2426,10 +2455,10 @@ function renderSchedule() {
               const offPeople = new Set(
                 state.staff.filter(s => (getReplies()[s.id]?.offDays || []).includes(d)).map(s => s.id)
               );
-              const rowBg = isWeekend ? 'background:var(--accent-light)' : '';
+              const rowBg = isWeekend ? 'background:var(--warn-light)' : '';
               return `<tr style="${rowBg}">
                 <td style="font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap">${month}/${d}</td>
-                <td style="text-align:center;font-weight:600;color:${isWeekend ? 'var(--accent)' : 'var(--fg2)'}">${DOW[dow]}</td>
+                <td style="text-align:center;font-weight:600;color:${isWeekend ? 'var(--warn)' : 'var(--fg2)'}">${DOW[dow]}${isWeekend ? ' <span style="font-size:10px">假日</span>' : ''}</td>
                 ${SHIFTS.map(shift => {
                   const assigned = dayShifts[shift] || '';
                   const isOff = assigned && offPeople.has(assigned);
@@ -3582,8 +3611,14 @@ function renderViewContent() {
       body = '<div class="info-box">本月尚未排班。</div>';
     } else {
       const cnt = {};
-      state.staff.forEach(s => { cnt[s.id] = {ER: 0, Ward: 0, Trauma: 0}; });
-      Object.values(sched).forEach(sh => ['ER', 'Ward', 'Trauma'].forEach(t => { if (sh[t] && cnt[sh[t]]) cnt[sh[t]][t]++; }));
+      state.staff.forEach(s => { cnt[s.id] = {ER: 0, Ward: 0, Trauma: 0, ERh: 0, Wardh: 0}; });
+      Object.entries(sched).forEach(([dd, sh]) => {
+        ['ER', 'Ward', 'Trauma'].forEach(t => { if (sh[t] && cnt[sh[t]]) cnt[sh[t]][t]++; });
+        if (isHoliday(year, month, +dd)) {
+          if (sh.ER && cnt[sh.ER]) cnt[sh.ER].ERh++;
+          if (sh.Ward && cnt[sh.Ward]) cnt[sh.Ward].Wardh++;
+        }
+      });
       const mine = x => x === v.name ? 'style="font-weight:700;color:var(--accent);background:var(--accent-light)"' : '';
       body = `
         <div class="table-wrap"><table>
@@ -3594,8 +3629,8 @@ function renderViewContent() {
               <td ${mine(sh.Trauma)}>${sh.Trauma || ''}</td><td ${mine(sh.Ward)}>${sh.Ward || ''}</td><td ${mine(sh.ER)}>${sh.ER || ''}</td></tr>`; }).join('')}</tbody></table></div>
         <div style="font-weight:700;margin:16px 0 6px">班數統計</div>
         <div class="table-wrap"><table>
-          <thead><tr><th>姓名</th><th>ER</th><th>Ward</th><th>Trauma</th></tr></thead>
-          <tbody>${state.staff.map(s => `<tr${s.id === v.name ? ' style="background:var(--accent-light)"' : ''}><td>${s.id}</td><td>${cnt[s.id].ER}</td><td>${cnt[s.id].Ward}</td><td>${cnt[s.id].Trauma}</td></tr>`).join('')}</tbody></table></div>`;
+          <thead><tr><th>姓名</th><th>ER</th><th>ER 假日</th><th>Ward</th><th>Ward 假日</th><th>Trauma</th></tr></thead>
+          <tbody>${state.staff.map(s => `<tr${s.id === v.name ? ' style="background:var(--accent-light)"' : ''}><td>${s.id}</td><td>${cnt[s.id].ER}</td><td style="color:var(--warn);font-weight:600">${cnt[s.id].ERh}</td><td>${cnt[s.id].Ward}</td><td style="color:var(--warn);font-weight:600">${cnt[s.id].Wardh}</td><td>${cnt[s.id].Trauma}</td></tr>`).join('')}</tbody></table></div>`;
     }
   }
   el.innerHTML = `
