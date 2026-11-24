@@ -940,7 +940,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-23-continue';
+const APP_VERSION = '2026-11-24-consec';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2575,8 +2575,10 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
       <span style="font-size:12px">排班後這些天將出現空班，建議先請相關人員修改填寫。</span>
     </div>` : '';
 
+  document.getElementById('auto-dialog')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  overlay.id = 'auto-dialog';
   overlay.innerHTML = `
     <div class="modal" style="max-width:560px;width:90vw">
       <div class="modal-header">
@@ -2597,6 +2599,14 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
           <div style="display:flex;align-items:center;gap:10px">
             <input type="number" id="ward-days-count" value="${wardPrefillCount}" min="1" max="${daysInMonth}" style="width:80px">
             ${wardPreset.length > 0 ? `<span style="font-size:12px;color:var(--success)">✓ 已從秘書設定預填（${wardPreset.length} 天）</span>` : '<span style="font-size:12px;color:var(--fg3)">（預設12天）</span>'}
+          </div>
+        </div>
+
+        <div>
+          <div class="form-label">允許連續值班次數</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="number" id="consec-count" value="0" min="0" max="5" style="width:80px">
+            <span style="font-size:12px;color:var(--fg3)">預設 0＝不允許。排不出班時，才讓同一人連續兩天值 ER，最多這麼多次。</span>
           </div>
         </div>
 
@@ -2694,10 +2704,14 @@ function rebalanceHolidayShifts(sched, movable, people, offMap, daysOf, isHol) {
   }
 }
 
-function executeAutoSchedule(year, month, daysInMonth, key) {
-  const wardRaw   = document.getElementById('ward-input').value.trim();
-  const wardDaysCount = parseInt(document.getElementById('ward-days-count').value) || 12;
-  const errEl = document.getElementById('schedule-error');
+function executeAutoSchedule(year, month, daysInMonth, key, opts) {
+  // opts (re-run from the warning window): {wardRaw, wardDaysCount, allowConsec}
+  const wardRaw   = opts ? opts.wardRaw : document.getElementById('ward-input').value.trim();
+  const wardDaysCount = opts ? opts.wardDaysCount : (parseInt(document.getElementById('ward-days-count').value) || 12);
+  const allowConsec = opts ? opts.allowConsec : Math.max(0, parseInt(document.getElementById('consec-count')?.value) || 0);
+  const autoInputs = {wardRaw, wardDaysCount};
+  let consecLeft = allowConsec;          // how many back-to-back shifts we may still hand out
+  const errEl = document.getElementById('schedule-error') || {style: {}};
   errEl.style.display = 'none';
 
   // Trauma comes from the picker (秘書設定 → Trauma 班指定)
@@ -2836,6 +2850,10 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
         return aPref - bPref;
       });
 
+      if (available.length === 0 && consecLeft > 0) {      // nobody fits: allow one back-to-back Ward shift
+        const fb = WARD_STAFF.filter(n => !offMap[n].has(d)).sort((a, b) => wardCount[a] - wardCount[b]);
+        if (fb.length) { available.push(fb[0]); consecLeft--; }
+      }
       if (available.length > 0) {
         wardSched[d] = available[0];
         wardCount[available[0]]++;
@@ -2926,6 +2944,35 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
     }
   }
 
+  // Repair empty days: free a person who is blocked only by a neighbouring *free* ER day,
+  // by handing that neighbouring day to someone else. Works without any back-to-back shift.
+  const allIds = state.staff.map(s => s.id);
+  const freeSet = new Set(freeDays);
+  const canTake = (n, day) => !offMap2[n].has(day) && !erDaysOfPerson[n].some(x => x === day - 1 || x === day + 1);
+  const moveER = (day, from, to) => {
+    erSched[day] = to; erCount[to]++; erDaysOfPerson[to].push(day); if (isWeekend(day)) erWkndCount[to]++;
+    if (from) { erCount[from]--; erDaysOfPerson[from] = erDaysOfPerson[from].filter(x => x !== day); if (isWeekend(day)) erWkndCount[from]--; }
+  };
+  for (const d of freeDays) {
+    if (erSched[d]) continue;
+    for (const P of allIds) {
+      if (offMap2[P].has(d)) continue;
+      const adj = [d - 1, d + 1].filter(a => erDaysOfPerson[P].includes(a));
+      if (!adj.length || !adj.every(a => freeSet.has(a))) continue;      // blocked by a fixed day: cannot repair
+      const plan = adj.map(a => ({a, Q: allIds.filter(n => n !== P && canTake(n, a)).sort((x, y) => erCount[x] - erCount[y])[0]}));
+      if (plan.some(x => !x.Q)) continue;
+      plan.forEach(x => moveER(x.a, P, x.Q));
+      moveER(d, null, P);
+      break;
+    }
+  }
+  // Still empty and the secretary allowed back-to-back shifts: use them, fewest ER shifts first.
+  for (const d of freeDays) {
+    if (erSched[d] || consecLeft <= 0) continue;
+    const fb = allIds.filter(n => !offMap2[n].has(d)).sort((a, b) => erCount[a] - erCount[b])[0];
+    if (fb) { moveER(d, null, fb); consecLeft--; }
+  }
+
   // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
   rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
   // Third pass: spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
@@ -2946,7 +2993,7 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
   const lockKey = getMonthKey();   // locking happens below: right away if all is fine, otherwise only when the secretary chooses 「繼續執行排班」
 
   // Close dialog
-  document.querySelector('.modal-overlay')?.remove();
+  document.getElementById('auto-dialog')?.remove();
   showPage('schedule');
 
   // ── Check for unassigned days ──────────────────────────────────────────────
@@ -3036,9 +3083,17 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
       <div style="font-size:13px">${WARD_STAFF.map(n => `${n} ${wardHolOf(n)}`).join('、')}<br>
       <span style="color:var(--fg3)">可能原因：固定指派，或預假、連續日限制使假日班無法互換。</span></div>`);
   }
-  if (emptyER.length || emptyWard.length || emptyTrauma.length || imbalance.length) {
+  const consecPairs = [];
+  for (let d = 1; d < daysInMonth; d++) {
+    const a = sched[d]?.ER;
+    if (a && a === sched[d + 1]?.ER) consecPairs.push(`${month}/${d}～${month}/${d + 1}　${a}`);
+  }
+  const emptyAllOff = emptyER.filter(d => allNames.every(n => offMap2[n].has(d)));
+  const emptyAdj = emptyER.filter(d => !emptyAllOff.includes(d));
+  if (emptyER.length || emptyWard.length || emptyTrauma.length || imbalance.length || consecPairs.length) {
     const lines = [];
-    if (emptyER.length)     lines.push(`⚠️ ER 空班（${emptyER.length} 天）：${emptyER.join('、')} 日`);
+    if (emptyAllOff.length) lines.push(`⚠️ ER 空班（${emptyAllOff.length} 天，<u>全部醫師都預假</u>）：${emptyAllOff.join('、')} 日`);
+    if (emptyAdj.length)    lines.push(`⚠️ ER 空班（${emptyAdj.length} 天，<u>其餘醫師因「不可連續值班」排不進</u>）：${emptyAdj.join('、')} 日`);
     if (emptyWard.length)   lines.push(`⚠️ Ward 空班（${emptyWard.length} 天）：${emptyWard.join('、')} 日`);
     if (emptyTrauma.length) lines.push(`⚠️ Trauma 空班（${emptyTrauma.length} 天）：${emptyTrauma.join('、')} 日`);
     const overlay = document.createElement('div');
@@ -3051,6 +3106,9 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
         <div class="modal-body">
           ${lines.length ? `<p style="margin-bottom:14px;font-size:14px">以下日期找不到可排班的人員，班表已儲存但這些天沒有值班醫師：</p>
           ${lines.map(l => `<div style="background:var(--surface2);border-left:4px solid var(--danger);padding:10px 14px;border-radius:4px;margin-bottom:8px;font-size:13px;font-weight:600">${l}</div>`).join('')}` : ''}
+          ${consecPairs.length ? `<div style="background:var(--warn-light);border-left:4px solid var(--warn);padding:10px 14px;border-radius:4px;margin-top:14px">
+            <div style="font-size:14px;font-weight:700;margin-bottom:6px">本次班表含 ${consecPairs.length} 次連續值班（ER）</div>
+            ${consecPairs.map(t => `<div style="font-size:13px">• ${t}</div>`).join('')}</div>` : ''}
           ${imbalance.length ? `<div style="background:var(--warn-light);border-left:4px solid var(--warn);padding:10px 14px;border-radius:4px;margin-top:${lines.length ? 14 : 0}px">
             <div style="font-size:14px;font-weight:700;margin-bottom:6px">班數無法平均分配</div>${imbalance.join('')}</div>` : ''}
           ${suggestions.length ? `<div style="background:var(--accent-light);border-left:4px solid var(--accent);padding:10px 14px;border-radius:4px;margin-top:14px">
@@ -3060,6 +3118,8 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
           <p style="margin-top:14px;font-size:13px;color:var(--fg3)">建議：請相關醫師調整不值班日期，或調整秘書設定的固定指派後重新排班，也可以在班表中手動調整。</p>
         </div>
         <div class="modal-footer" style="display:flex;gap:10px;flex-wrap:wrap">
+          ${(emptyAdj.length || emptyWard.length) ? `<button class="btn btn-secondary" id="warn-rerun" style="width:100%;justify-content:center;border-color:var(--accent);color:var(--accent)">
+            🔁 允許 ${allowConsec + 1} 次連續值班，重新排班</button>` : ''}
           <button class="btn btn-secondary" id="warn-view" style="flex:1;min-width:150px;justify-content:center">知道了，前往班表查看</button>
           <button class="btn btn-primary" id="warn-continue" style="flex:1;min-width:150px;justify-content:center">繼續執行排班</button>
         </div>
@@ -3069,6 +3129,11 @@ function executeAutoSchedule(year, month, daysInMonth, key) {
         </div>
       </div>`;
     document.body.appendChild(overlay);
+    const rerunBtn = overlay.querySelector('#warn-rerun');
+    if (rerunBtn) rerunBtn.onclick = () => {
+      overlay.remove();
+      executeAutoSchedule(year, month, daysInMonth, key, {...autoInputs, allowConsec: allowConsec + 1});
+    };
     overlay.querySelector('#warn-view').onclick = () => {
       overlay.remove();
       showToast('班表已保留，尚未鎖定。調整後可重新執行自動排班');
