@@ -940,7 +940,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-24-consec';
+const APP_VERSION = '2026-11-24-holiday';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -1402,8 +1402,7 @@ function renderDashboard() {
             const availDays = daysInMonth - offDays.length;
             const weekends = [];
             for (let d = 1; d <= daysInMonth; d++) {
-              const dow = new Date(year, month-1, d).getDay();
-              if (dow === 0 || dow === 6) weekends.push(d);
+              if (isHoliday(year, month, d)) weekends.push(d);
             }
             const availWeekends = weekends.filter(d => !offDays.includes(d));
             const valid = r ? (availDays >= 10 && availWeekends.length >= 1) : null;
@@ -1485,7 +1484,7 @@ function renderReplies() {
               <td style="max-width:220px">
                 ${offDays.length ? offDays.map(d => {
                   const dow = new Date(year, month-1, d).getDay();
-                  const isWeekend = dow === 0 || dow === 6;
+                  const isWeekend = isHoliday(year, month, d);
                   return `<span class="assign-pill" style="${isWeekend ? 'background:var(--warn-light);color:var(--warn)' : ''}">${month}/${d}(${DOW[dow]})</span>`;
                 }).join('') : '<span style="color:var(--fg3)">—</span>'}
               </td>
@@ -2337,7 +2336,7 @@ function renderSchedule() {
   const days = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dow = new Date(year, month-1, d).getDay();
-    days.push({d, dow, isWeekend: dow === 0 || dow === 6});
+    days.push({d, dow, isWeekend: isHoliday(year, month, d)});
   }
 
   // Count shifts per person per type
@@ -3489,6 +3488,18 @@ window.exportScheduleToGoogleSheets = async function() {
   showToast('📊 班表已複製！請在新開的 Google 試算表按 Ctrl+V 貼上', 6000);
 };
 
+// Doctors' browsers don't have the secretary's settings: fetch this month's extra holidays / make-up workdays.
+async function applyMonthHolidays(year, month) {
+  try {
+    const {data} = await sb.rpc('get_month_holidays', {p_key: `${year}-${month}`});
+    if (!data) return;
+    const key = `${year}-${month}`;
+    state.secretarySettings = state.secretarySettings || {};
+    state.secretarySettings.holidays = {...(state.secretarySettings.holidays || {}), [key]: data.holidays || []};
+    state.secretarySettings.extraWorkdays = {...(state.secretarySettings.extraWorkdays || {}), [key]: data.extra_workdays || []};
+  } catch (e) { /* older database without the function: fall back to plain weekends */ }
+}
+
 // ─── Doctors' read-only view (?year=YYYY&month=MM&view=schedule|replies) ─────
 let viewState = null;
 
@@ -3638,6 +3649,7 @@ function enterFillMode(year, month) {
   if (fill) {                                   // doctor: no login, name list from server
     const {data} = await sb.rpc('list_doctors');
     if (data && data.length) state.staff = data.map(d => ({id: d.name, email: '', color: '#6b7280'}));
+    await applyMonthHolidays(fill.year, fill.month);
     enterFillMode(fill.year, fill.month);
     return;
   }
