@@ -453,6 +453,10 @@ tbody td { padding: 10px 14px; vertical-align: middle; }
 }
 td:hover .add-slot-btn { display: block; }
 .add-slot-btn:hover { background: var(--surface2); }
+.empty-slot {
+  display: block; width: 100%; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 0; text-align: center;
+  border-radius: 4px; border: 1.5px solid var(--danger); background: var(--danger-light, #fee2e2); color: var(--danger);
+}
 
 /* ─── Reply form (doctor view) ─── */
 .form-section { max-width: 600px; margin: 0 auto; }
@@ -943,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-25-wardsolver';
+const APP_VERSION = '2026-11-25-emptyred';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2329,6 +2333,14 @@ function renderSchedule() {
   const daysInMonth = new Date(year, month, 0).getDate();
 
   const hasSched = Object.keys(sched).length > 0;
+  // A shift counts as an empty slot (空班) when it should be filled but is not:
+  // ER every day; Ward on the Ward days set in 秘書設定; Trauma on the designated Trauma days.
+  const wardExpected = state.secretarySettings?.wardPreset?.[key] || [];
+  const traumaExpected = Object.keys(state.secretarySettings?.traumaPreset?.[key] || {}).map(Number);
+  const isEmptySlot = (d, shift) => hasSched && !(sched[d]?.[shift]) &&
+    (shift === 'ER' || (shift === 'Ward' && wardExpected.includes(d)) || (shift === 'Trauma' && traumaExpected.includes(d)));
+  const emptySlots = [];
+  for (let d = 1; d <= daysInMonth; d++) SHIFTS.forEach(sh => { if (isEmptySlot(d, sh)) emptySlots.push(`${month}/${d} ${sh}`); });
   document.getElementById('topbar-actions').innerHTML = `
     ${hasSched ? `<button class="btn btn-secondary" onclick="exportScheduleXlsx()">📥 匯出 Excel</button>
     <button class="btn btn-secondary" onclick="exportScheduleToGoogleSheets()">📊 匯出到 Google 試算表</button>` : ''}
@@ -2375,6 +2387,9 @@ function renderSchedule() {
     </div>
 
     ${(state.scheduleMeta?.[key]?.disabled || []).length ? `<div class="info-box" style="margin-bottom:16px;font-size:13px">本月班表為了排出結果，已放棄規則：${state.scheduleMeta[key].disabled.map(r => `<strong>${r}</strong> ${RULE_NAMES[r]}`).join('；')}</div>` : ''}
+
+    ${emptySlots.length ? `<div style="background:var(--danger-light, #fee2e2);border:1.5px solid var(--danger);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;color:var(--danger);font-size:13px">
+      <strong>⚠️ 本月班表有 ${emptySlots.length} 個空班</strong>（紅色標示，點擊可指派）：${emptySlots.join('、')}</div>` : ''}
 
     <!-- Shift count -->
     <div class="card" style="margin-bottom:16px">
@@ -2461,8 +2476,9 @@ function renderSchedule() {
                 state.staff.filter(s => (getReplies()[s.id]?.offDays || []).includes(d)).map(s => s.id)
               );
               const rowBg = isWeekend ? 'background:var(--warn-light)' : '';
+              const rowHasEmpty = SHIFTS.some(sh => isEmptySlot(d, sh));
               return `<tr style="${rowBg}">
-                <td style="font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap">${month}/${d}</td>
+                <td style="font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;${rowHasEmpty ? 'color:var(--danger)' : ''}">${month}/${d}${rowHasEmpty ? ' ⚠' : ''}</td>
                 <td style="text-align:center;font-weight:600;color:${isWeekend ? 'var(--warn)' : 'var(--fg2)'}">${DOW[dow]}${isWeekend ? ' <span style="font-size:10px">假日</span>' : ''}</td>
                 ${SHIFTS.map(shift => {
                   const assigned = dayShifts[shift] || '';
@@ -2471,8 +2487,9 @@ function renderSchedule() {
                     ${assigned ? `<div class="slot ${SHIFT_CLASS[shift]||''}" onclick="openSlotEdit(${d},'${shift}')" title="點擊更改">
                       <span>${assigned}</span>
                       <button class="remove-btn" onclick="event.stopPropagation();removeSlot(${d},'${shift}')">✕</button>
-                    </div>` :
-                    `<button class="add-slot-btn" onclick="openSlotEdit(${d},'${shift}')">+</button>`}
+                    </div>` : (isEmptySlot(d, shift)
+                      ? `<button class="empty-slot" onclick="openSlotEdit(${d},'${shift}')" title="空班：點擊指派">⚠ 空班</button>`
+                      : `<button class="add-slot-btn" onclick="openSlotEdit(${d},'${shift}')">+</button>`)}
                   </td>`;
                 }).join('')}
               </tr>`;
