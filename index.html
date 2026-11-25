@@ -943,7 +943,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-25-limits11';
+const APP_VERSION = '2026-11-25-wardsolver';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2853,6 +2853,50 @@ function evaluateRules(sched, c) {
   return ev;
 }
 
+// Exact search for the auto-assigned Ward days (7 people × ~12 days is tiny).
+// opt = {r1: off days are hard, r8: each person 1–2 Ward shifts, r9: a person with 2+ Ward shifts has no holiday Ward}.
+// R5 (no back-to-back Ward days) is always enforced. When R1 is given up, off days are allowed but the search
+// minimises how many are used. Returns {day: person} or null if impossible under these constraints.
+function solveWardDays(days, fixed, persons, offMap, prefer, isHol, opt) {
+  const assign = {}, mine = {};
+  persons.forEach(p => { mine[p] = []; });
+  Object.entries(fixed).forEach(([d, p]) => { if (mine[p]) mine[p].push(+d); });
+  const total = Object.keys(fixed).length + days.length;
+  const needMin = opt.r8 && total >= persons.length;
+  const holCnt = p => mine[p].filter(isHol).length;
+  const ok = (p, d) => {
+    if (opt.r1 && offMap[p]?.has(d)) return false;
+    if (mine[p].includes(d - 1) || mine[p].includes(d + 1)) return false;           // R5
+    const n = mine[p].length + 1;
+    if (opt.r8 && n > 2) return false;
+    if (opt.r9 && n >= 2 && holCnt(p) + (isHol(d) ? 1 : 0) >= 1) return false;
+    return true;
+  };
+  let best = null, bestCost = Infinity, nodes = 0;
+  (function dfs(i, cost) {
+    if (++nodes > 200000 || cost >= bestCost) return;
+    if (i === days.length) {
+      if (needMin && persons.some(p => mine[p].length < 1)) return;
+      best = {...assign}; bestCost = cost; return;
+    }
+    const remaining = days.length - i;
+    if (opt.r8 && persons.reduce((a, p) => a + Math.max(0, 2 - mine[p].length), 0) < remaining) return;
+    if (needMin && persons.filter(p => mine[p].length === 0).length > remaining) return;
+    const d = days[i];
+    const cands = persons.filter(p => ok(p, d)).sort((a, b) =>
+      (mine[a].length - mine[b].length) ||
+      (isHol(d) ? holCnt(a) - holCnt(b) : 0) ||
+      ((prefer[a]?.has(d) ? -1 : 0) - (prefer[b]?.has(d) ? -1 : 0)));
+    for (const p of cands) {
+      assign[d] = p; mine[p].push(d);
+      dfs(i + 1, cost + (offMap[p]?.has(d) ? 1 : 0));
+      mine[p].pop(); delete assign[d];
+      if (bestCost === 0) return;
+    }
+  })(0, 0);
+  return best;
+}
+
 function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   // opts (re-run from the warning window): {wardRaw, wardDaysCount, allowConsec}
   const wardRaw   = opts ? opts.wardRaw : document.getElementById('ward-input').value.trim();
@@ -2974,52 +3018,71 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
       }
     }
 
-    // Greedily assign ward days, picking person with fewest wards
-    for (let i = 0; i < Math.min(remainWardCount, candidateDays.length); i++) {
-      const d = candidateDays[i];
-      // Find available ward staff (not off, not consecutive with own assignments)
-      const assignedDaysOfPerson = {};
-      WARD_STAFF.forEach(n => { assignedDaysOfPerson[n] = []; });
-      Object.entries(wardSched).forEach(([day, name]) => { assignedDaysOfPerson[name]?.push(parseInt(day)); });
+    // Exact search first (respects R5 always, and R1/R8/R9 unless the secretary gave them up).
+    // If a rule combination is impossible, relax R9, then R8, and let the checker report what is violated.
+    const daysToAssign = candidateDays.slice(0, remainWardCount);
+    const base = {r1: !off.has('R1'), r8: !off.has('R8'), r9: !off.has('R9')};
+    const tries = [base];
+    if (base.r9) tries.push({...base, r9: false});
+    if (base.r8) tries.push({...base, r8: false, r9: false});
+    let solved = null, usedR9 = false;
+    for (const t of tries) { solved = solveWardDays(daysToAssign, wardSched, WARD_STAFF, offMap, preferMapW, isHol, t); if (solved) { usedR9 = t.r9; break; } }
+    if (solved) {
+      Object.entries(solved).forEach(([d, who]) => { wardSched[+d] = who; autoWardDays.push(+d); });
+      if (!usedR9 && !off.has('R9')) {      // R9 could not be a hard constraint: still reduce violations with swaps
+        const wDays2 = {}; WARD_STAFF.forEach(n => { wDays2[n] = []; });
+        Object.entries(wardSched).forEach(([day, name]) => { wDays2[name]?.push(parseInt(day)); });
+        enforceWeekdayWard(wardSched, autoWardDays, WARD_STAFF, offMap, wDays2, isHol);
+      }
+    } else {
+      // Greedily assign ward days, picking person with fewest wards
+      for (let i = 0; i < Math.min(remainWardCount, candidateDays.length); i++) {
+        const d = candidateDays[i];
+        // Find available ward staff (not off, not consecutive with own assignments)
+        const assignedDaysOfPerson = {};
+        WARD_STAFF.forEach(n => { assignedDaysOfPerson[n] = []; });
+        Object.entries(wardSched).forEach(([day, name]) => { assignedDaysOfPerson[name]?.push(parseInt(day)); });
 
-      const available = WARD_STAFF.filter(n => {
-        if (offMap[n].has(d)) return false;                           // R1
-        if (!off.has('R8') && wardCount[n] >= 2) return false;        // R8: at most 2 Ward shifts each
-        // Consecutive check per person (R5, always enforced)
-        const myDays = assignedDaysOfPerson[n];
-        if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
-        return true;
-      }).sort((a,b) => {
-        // Balance first (fewest ward shifts), preferred day is only a tie-breaker
-        if (wardCount[a] !== wardCount[b]) return wardCount[a] - wardCount[b];
-        if (isHol(d)) {                       // holiday Ward shift: favour whoever has fewer holiday Ward shifts
-          const ah = assignedDaysOfPerson[a].filter(isHol).length, bh = assignedDaysOfPerson[b].filter(isHol).length;
-          if (ah !== bh) return ah - bh;
+        const available = WARD_STAFF.filter(n => {
+          if (offMap[n].has(d)) return false;                           // R1
+          if (!off.has('R8') && wardCount[n] >= 2) return false;        // R8: at most 2 Ward shifts each
+          // Consecutive check per person (R5, always enforced)
+          const myDays = assignedDaysOfPerson[n];
+          if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
+          return true;
+        }).sort((a,b) => {
+          // Balance first (fewest ward shifts), preferred day is only a tie-breaker
+          if (wardCount[a] !== wardCount[b]) return wardCount[a] - wardCount[b];
+          if (isHol(d)) {                       // holiday Ward shift: favour whoever has fewer holiday Ward shifts
+            const ah = assignedDaysOfPerson[a].filter(isHol).length, bh = assignedDaysOfPerson[b].filter(isHol).length;
+            if (ah !== bh) return ah - bh;
+          }
+          const aPref = (preferMapW[a]?.has(d)) ? -1 : 0;
+          const bPref = (preferMapW[b]?.has(d)) ? -1 : 0;
+          return aPref - bPref;
+        });
+
+        if (available.length === 0 && off.has('R1')) {      // R1 given up: nobody free → use someone who is off that day (never back-to-back: R5)
+          const fb = WARD_STAFF.filter(n => !assignedDaysOfPerson[n].includes(d - 1) && !assignedDaysOfPerson[n].includes(d + 1))
+            .sort((a, b) => wardCount[a] - wardCount[b]);
+          if (fb.length) available.push(fb[0]);
         }
-        const aPref = (preferMapW[a]?.has(d)) ? -1 : 0;
-        const bPref = (preferMapW[b]?.has(d)) ? -1 : 0;
-        return aPref - bPref;
-      });
+        if (available.length > 0) {
+          wardSched[d] = available[0];
+          wardCount[available[0]]++;
+          assignedDaysOfPerson[available[0]].push(d);
+          autoWardDays.push(d);
+        }
+      }
 
-      if (available.length === 0 && off.has('R1')) {      // R1 given up: nobody free → use someone who is off that day (never back-to-back: R5)
-        const fb = WARD_STAFF.filter(n => !assignedDaysOfPerson[n].includes(d - 1) && !assignedDaysOfPerson[n].includes(d + 1))
-          .sort((a, b) => wardCount[a] - wardCount[b]);
-        if (fb.length) available.push(fb[0]);
-      }
-      if (available.length > 0) {
-        wardSched[d] = available[0];
-        wardCount[available[0]]++;
-        assignedDaysOfPerson[available[0]].push(d);
-        autoWardDays.push(d);
-      }
+      // Second pass: even out ward shifts among the 7 ward staff
+      const wDays = {};
+      WARD_STAFF.forEach(n => { wDays[n] = []; });
+      Object.entries(wardSched).forEach(([day, name]) => { wDays[name]?.push(parseInt(day)); });
+      rebalanceDays(wardSched, autoWardDays, WARD_STAFF, offMap, wardCount, wDays, preferMapW);
+      if (!off.has('R9')) enforceWeekdayWard(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
+
     }
-
-    // Second pass: even out ward shifts among the 7 ward staff
-    const wDays = {};
-    WARD_STAFF.forEach(n => { wDays[n] = []; });
-    Object.entries(wardSched).forEach(([day, name]) => { wDays[name]?.push(parseInt(day)); });
-    rebalanceDays(wardSched, autoWardDays, WARD_STAFF, offMap, wardCount, wDays, preferMapW);
-    if (!off.has('R9')) enforceWeekdayWard(wardSched, autoWardDays, WARD_STAFF, offMap, wDays, isHol);
   }
 
   const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
