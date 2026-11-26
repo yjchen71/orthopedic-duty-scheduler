@@ -959,7 +959,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-27-availcal';
+const APP_VERSION = '2026-11-27-r14';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2693,10 +2693,16 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
         ${warnHTML}
+        ${(() => {
+          const r4 = getRecent4(year, month), who = Object.entries(r4.names);
+          return `<div class="info-box" style="font-size:12px;line-height:1.7">📌 <strong>參考前兩個月（R14）</strong>：${
+            !r4.labels.length ? '沒有可參考的班表（2026/11 以前不列入參考）'
+            : `已參考 ${r4.labels.join('、')}；${who.length ? '前兩個月 ER 有 4 班者：' + who.map(([n, ms]) => `${n}（${ms.join('、')}）`).join('、') + '，本月優先排在較少的一檔' : '沒有人出現 4 班'}`}</div>`;
+        })()}
         <div class="info-box" style="font-size:12px;line-height:1.7">
           <strong>排班規則：</strong><br>
           <u>硬性</u>　R1 預假不排班　R2 人員資格　R3 每天一位 ER，Trauma／Ward 日 ER 同一人　R4 秘書指定優先　R5 不連續值 Ward<br>
-          <u>可放棄</u>　R6 不連續值 ER　R7 ER 總班數（二月 2～3、其他月 3～4）　R8 Ward 每人 1～2 班　R9 Ward 兩班者皆平日　R10 ER 假日班差距 ≤1　R11 假日 ER 2 班者總班數為較少一檔　R13 總班數多者，假日 ER 優先給總班數少者<br>
+          <u>可放棄</u>　R6 不連續值 ER　R7 ER 總班數（二月 2～3、其他月 3～4）　R8 Ward 每人 1～2 班　R9 Ward 兩班者皆平日　R10 ER 假日班差距 ≤1　R11 假日 ER 2 班者總班數為較少一檔　R13 總班數多者，假日 ER 優先給總班數少者　R14 前兩個月 ER 4 班者本月優先排較少一檔<br>
           <span style="color:var(--fg3)">排不出班時，可在結果視窗選擇放棄哪一條規則後重排。</span>
         </div>
 
@@ -2752,7 +2758,7 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
 // sched: {day: name}   movable: days that may be reassigned   people: eligible names
 // load: {name: count} (updated in place)   daysOf: {name: [days]} (updated in place)
 // prefer: {name: Set} only used to choose WHICH day to move (keep the donor's preferred days)
-function rebalanceDays(sched, movable, people, offMap, load, daysOf, prefer) {
+function rebalanceDays(sched, movable, people, offMap, load, daysOf, prefer, maxOf) {
   for (let guard = 0; guard < 500; guard++) {
     let moved = false;
     const donors = [...people].sort((a, b) => load[b] - load[a]);
@@ -2761,6 +2767,7 @@ function rebalanceDays(sched, movable, people, offMap, load, daysOf, prefer) {
       const receivers = [...people].sort((a, b) => load[a] - load[b]);
       for (const rec of receivers) {
         if (load[donor] - load[rec] < 2) break;
+        if (maxOf && load[rec] + 1 > maxOf(rec)) continue;
         const cands = movable.filter(d => sched[d] === donor
           && !(offMap[rec] && offMap[rec].has(d))
           && !daysOf[rec].includes(d - 1) && !daysOf[rec].includes(d + 1));
@@ -2836,6 +2843,25 @@ function enforceWeekdayWard(sched, movable, people, offMap, daysOf, isHol) {
   }
 }
 
+// ─── Look-back (R14): who had 4 ER shifts in the previous two months? ─────────────────────
+// Only schedules from this month onward count; 2026/11 and earlier are never used as reference.
+const REF_START = 202612;
+function getRecent4(year, month) {
+  const labels = [], names = {};
+  [1, 2].forEach(k => {
+    let y = year, m = month - k;
+    while (m < 1) { m += 12; y--; }
+    if (y * 100 + m < REF_START) return;
+    const sc = state.schedule?.[`${y}-${m}`];
+    if (!sc || !Object.keys(sc).length) return;
+    labels.push(`${y}/${String(m).padStart(2, '0')}`);
+    const cnt = {};
+    Object.values(sc).forEach(x => { if (x?.ER) cnt[x.ER] = (cnt[x.ER] || 0) + 1; });
+    Object.entries(cnt).forEach(([n, c]) => { if (c >= 4) (names[n] = names[n] || []).push(`${y}/${String(m).padStart(2, '0')}`); });
+  });
+  return {labels, names};
+}
+
 // ─── Rules (numbers are shown to the secretary in the warning window) ───────
 const RULE_NAMES = {
   R1: '預假不排班',
@@ -2851,9 +2877,10 @@ const RULE_NAMES = {
   R11: 'ER 假日班有 2 班者，其 ER 總班數為當月較少的一檔（二月 2 班、其他月 3 班）',
   R12: '醫師「期待值班」日期（加分）',
   R13: 'ER 總班數較多的人，ER 假日班優先給總班數較少的人',
+  R14: '前兩個月 ER 有 4 班者，本月優先排在較少的一檔（非二月 3 班；二月 2 班）。2026/11（含）以前不列入參考',
 };
 // Rules the secretary may choose to give up when a complete schedule is not possible (R2–R5 are never droppable)
-const DROPPABLE_RULES = ['R1', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R13'];
+const DROPPABLE_RULES = ['R1', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R13', 'R14'];
 const RULE_DROP_NOTE = {
   R1: '無人可排的日子，改排給預假的人',
   R6: '允許同一人連續兩天值 ER（只在排不出來時才使用）',
@@ -2863,13 +2890,14 @@ const RULE_DROP_NOTE = {
   R10: '不再要求 ER 假日班差距不超過 1',
   R11: '不再要求假日 ER 2 班者落在較少的一檔',
   R13: '不再要求假日 ER 班依總班數由少到多分配',
+  R14: '不再參考前兩個月的班數',
 };
 
 // Rule R13: whoever has more ER shifts in total should not have more holiday ER shifts than someone with fewer.
 // Swaps are one-for-one (a holiday day for a weekday day), so every person's total stays unchanged.
 // First a direct swap between the two people; if that is blocked (off days / back-to-back), a two-step chain
 // through a third person (A→C, then C→B) is tried.
-function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol, lo = 0, hi = Infinity) {
+function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol, lo = 0, hi = Infinity, maxOf = null) {
   const hc = n => daysOf[n].filter(isHol).length;
   const apply = (P, d, Q, e) => {                // P gives day d to Q, Q gives day e to P (unchecked)
     sched[d] = Q; sched[e] = P;
@@ -2892,7 +2920,7 @@ function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol, l
         if (load[A] <= load[B] || hc(A) <= hc(B)) continue;
         // Option 1: A is exactly one shift ahead → hand B one of A's weekday ER days. The totals flip
         // (B now has more, A fewer) while the holiday counts stay as they are, so B (fewer holidays) is the busier one.
-        if (load[A] - load[B] === 1 && load[A] - 1 >= lo && load[B] + 1 <= hi) {
+        if (load[A] - load[B] === 1 && load[A] - 1 >= lo && load[B] + 1 <= hi && (!maxOf || load[B] + 1 <= maxOf(B))) {
           const t = wk(A).find(d => !offMap[B]?.has(d) && !daysOf[B].includes(d - 1) && !daysOf[B].includes(d + 1));
           if (t !== undefined) {
             sched[t] = B; load[A]--; load[B]++;
@@ -2923,14 +2951,14 @@ function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol, l
 
 // Rule R11: a person with 2 holiday ER shifts should sit on the lower total tier. Hands one weekday free ER day
 // to someone with fewer total shifts (and fewer than 2 holiday shifts), keeping everybody within [lowTier, maxTotal].
-function lowerTierForHoliday2(sched, movable, people, offMap, load, daysOf, isHol, lowTier, maxTotal) {
+function lowerTierForHoliday2(sched, movable, people, offMap, load, daysOf, isHol, lowTier, maxTotal, maxOf = null) {
   for (let g = 0; g < 200; g++) {
     let moved = false;
     outer:
     for (const P of people) {
       if (daysOf[P].filter(isHol).length < 2 || load[P] <= lowTier) continue;
       for (const Q of [...people].sort((a, b) => load[a] - load[b])) {
-        if (Q === P || load[Q] >= load[P] || load[Q] >= maxTotal) continue;
+        if (Q === P || load[Q] >= load[P] || load[Q] >= maxTotal || (maxOf && load[Q] + 1 > maxOf(Q))) continue;
         if (daysOf[Q].filter(isHol).length >= 2) continue;
         const d = movable.find(x => sched[x] === P && !isHol(x) && !offMap[Q]?.has(x)
           && !daysOf[Q].includes(x - 1) && !daysOf[Q].includes(x + 1));
@@ -2946,7 +2974,7 @@ function lowerTierForHoliday2(sched, movable, people, offMap, load, daysOf, isHo
 
 // Checks a finished schedule against the rules (skipping rules the secretary has given up).
 function evaluateRules(sched, c) {
-  const {year, month, daysInMonth, off, isHol, offOf, fixed, wardExpected, traumaExpected, names, wardStaff, wanted = {}} = c;
+  const {year, month, daysInMonth, off, isHol, offOf, fixed, wardExpected, traumaExpected, names, wardStaff, wanted = {}, recent4 = {}} = c;
   const ev = {emptyER: [], emptyWard: [], emptyTrauma: [], violations: []};
   const dl = d => `${month}/${d}(${DOW[new Date(year, month - 1, d).getDay()]})`;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -2994,6 +3022,7 @@ function evaluateRules(sched, c) {
       r13.push(`${A}（ER ${cnt('ER', A)} 班、假日 ${hcnt('ER', A)} 班）比 ${B}（ER ${cnt('ER', B)} 班、假日 ${hcnt('ER', B)} 班）總班數多、假日班卻不少`);
   }));
   add('R13', r13);
+  add('R14', names.filter(n => recent4[n] && cnt('ER', n) > lo).map(n => `${n}：${recent4[n].join('、')} 已有 ER 4 班，本月仍有 ${cnt('ER', n)} 班（優先應為 ${lo} 班）`));
   add('R11', names.filter(n => hcnt('ER', n) >= 2 && cnt('ER', n) > lo).map(n => `${n}：假日 ER ${hcnt('ER', n)} 班，ER 總班數 ${cnt('ER', n)} 班（應為 ${lo} 班）`));
   return ev;
 }
@@ -3049,6 +3078,7 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   const allowConsec = opts ? opts.allowConsec : Math.max(0, parseInt(document.getElementById('consec-count')?.value) || 0);
   const autoInputs = {wardRaw, wardDaysCount};
   const off = new Set(opts?.disabled || []);   // rules the secretary has chosen to give up
+  const recent4 = getRecent4(year, month).names;   // R14: had 4 ER shifts in the previous two months
   let consecLeft = off.has('R6') ? Infinity : allowConsec;   // back-to-back ER shifts we may still hand out (R6)
   const errEl = document.getElementById('schedule-error') || {style: {}};
   errEl.style.display = 'none';
@@ -3261,6 +3291,7 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     wardExpected: state.secretarySettings?.wardPreset?.[key] || [],
     traumaExpected: Object.keys(state.secretarySettings?.traumaPreset?.[key] || {}).map(Number),
     wanted: {Trauma: traumaSched, Ward: fixedWard, ER: fixedER},
+    recent4: off.has('R14') ? {} : recent4,
   };
   const consecStart = consecLeft;
   const buildSched = es => {
@@ -3327,7 +3358,10 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
                    : mode === 'holRand' ? [...shuffled(holDays), ...shuffled(wkdDays)]
                    : mode === 'rand' ? shuffled(freeDays) : freeDays;
     const holN = n => erDaysOfPerson[n].filter(isHol).length;
-    const capOK = n => off.has('R7') || erCount[n] < maxER;
+    const lowTierN = month === 2 ? 2 : 3;
+    // most ER shifts a person may get this month: R7 upper bound, and R14 (4 shifts recently → the lower tier)
+    const maxOf = n => Math.min(off.has('R7') ? Infinity : maxER, (!off.has('R14') && recent4[n]) ? lowTierN : Infinity);
+    const capOK = n => erCount[n] < maxOf(n);
     for (const d of dayOrder) {
       const wknd = isWeekend(d);
       const available = state.staff.filter(s => {
@@ -3395,15 +3429,15 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     }
 
     // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
-    rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
+    rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap, maxOf);
     // Third pass (R10): spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
     if (!off.has('R10')) rebalanceHolidayShifts(erSched, freeDays, state.staff.map(s => s.id), offMap2, erDaysOfPerson, isHol);
     // Fourth pass (R11): people with 2 holiday ER shifts sit on the lower total tier
     if (!off.has('R11')) lowerTierForHoliday2(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
-                                              month === 2 ? 2 : 3, maxER);
+                                              month === 2 ? 2 : 3, maxER, maxOf);
     // Fifth pass (R13): holiday ER shifts go to people with fewer total ER shifts first
     if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
-                                        off.has('R7') ? 0 : (month === 2 ? 2 : 3), off.has('R7') ? Infinity : maxER);
+                                        off.has('R7') ? 0 : (month === 2 ? 2 : 3), off.has('R7') ? Infinity : maxER, maxOf);
 
 
     return {erSched, erCount, erDaysOfPerson, freeDays};
