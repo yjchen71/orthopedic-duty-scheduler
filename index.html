@@ -947,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-26-r13';
+const APP_VERSION = '2026-11-26-multistart';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -3176,149 +3176,175 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   const wardDays = Object.keys(wardSched).map(Number).sort((a,b)=>a-b);
 
   // ── Step 3: ER assignment ──
-  // Coupled days (Trauma / Ward carry their person into ER)
-  const erSched = {};
-  traumaDays.forEach(d => { erSched[d] = traumaSched[d]; });
-  wardDays.forEach(d => { erSched[d] = wardSched[d]; });
-
-  // Apply secretary fixed assignments (override free days, skip already-coupled)
+  // The ER phase is run several times with different tie-breaks / day orders; the result with the fewest
+  // empty days and rule violations is kept (the first attempt is the plain deterministic one).
   const fixedER = (state.secretarySettings?.fixedAssign?.[key]?.er) || {};
-  Object.entries(fixedER).forEach(([ds, name]) => {
-    const d = parseInt(ds);
-    if (!erSched[d]) {  // only assign if not already taken by trauma/ward coupling
-      const person = state.staff.find(s => s.id === name);
-      if (person) erSched[d] = name;
-    }
-  });
-
-  // Free ER days (no trauma, no ward, no fixed)
-  const freeDays = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    if (!erSched[d]) freeDays.push(d);
-  }
-
-  // Balance free ER across all 10 staff
-  const erCount = {}; // total ER per person
-  const erWkndCount = {};
-  state.staff.forEach(s => { erCount[s.id] = 0; erWkndCount[s.id] = 0; });
-  // Count coupled + fixed ER (they all count toward the person's total)
-  Object.entries(erSched).forEach(([d, n]) => {
-    if (erCount[n] !== undefined) {
-      erCount[n]++;
-      if (isWeekend(parseInt(d))) erWkndCount[n]++;
-    }
-  });
-
-  // Track each person's ER days for consecutive check
-  const erDaysOfPerson = {};
-  state.staff.forEach(s => { erDaysOfPerson[s.id] = []; });
-  Object.entries(erSched).forEach(([d, n]) => { erDaysOfPerson[n].push(parseInt(d)); });
-
+  const allIds = state.staff.map(s => s.id);
   const offMap2 = {};
   const preferMap = {}; // preferDays per person
   state.staff.forEach(s => {
     offMap2[s.id] = new Set(getReplies()[s.id]?.offDays || []);
     preferMap[s.id] = off.has('R12') ? new Set() : new Set(getReplies()[s.id]?.preferDays || []);
   });
-
-  const maxER = month === 2 ? 3 : 4;                              // R7 upper bound
-  const capOK = n => off.has('R7') || erCount[n] < maxER;
-  for (const d of freeDays) {
-    const wknd = isWeekend(d);
-    const available = state.staff.filter(s => {
-      if (offMap2[s.id].has(d)) return false;                    // R1
-      if (!capOK(s.id)) return false;                            // R7
-      const myDays = erDaysOfPerson[s.id];
-      if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
-      return true;
-    }).sort((a, b) => {
-      // Balance first: fewest total ER shifts; preferred day / weekend count only break ties
-      if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
-      const aPref = preferMap[a.id].has(d) ? -1 : 0;
-      const bPref = preferMap[b.id].has(d) ? -1 : 0;
-      if (aPref !== bPref) return aPref - bPref;
-      if (wknd) return erWkndCount[a.id] - erWkndCount[b.id];
-      return 0;
-    });
-
-    if (available.length > 0) {
-      const chosen = available[0];
-      erSched[d] = chosen.id;
-      erCount[chosen.id]++;
-      if (wknd) erWkndCount[chosen.id]++;
-      erDaysOfPerson[chosen.id].push(d);
-    }
-  }
-
-  // Repair empty days: free a person who is blocked only by a neighbouring *free* ER day,
-  // by handing that neighbouring day to someone else. Works without any back-to-back shift.
-  const allIds = state.staff.map(s => s.id);
-  const freeSet = new Set(freeDays);
-  const canTake = (n, day) => !offMap2[n].has(day) && capOK(n) && !erDaysOfPerson[n].some(x => x === day - 1 || x === day + 1);
-  const moveER = (day, from, to) => {
-    erSched[day] = to; erCount[to]++; erDaysOfPerson[to].push(day); if (isWeekend(day)) erWkndCount[to]++;
-    if (from) { erCount[from]--; erDaysOfPerson[from] = erDaysOfPerson[from].filter(x => x !== day); if (isWeekend(day)) erWkndCount[from]--; }
-  };
-  for (const d of freeDays) {
-    if (erSched[d]) continue;
-    for (const P of allIds) {
-      if (offMap2[P].has(d)) continue;
-      const adj = [d - 1, d + 1].filter(a => erDaysOfPerson[P].includes(a));
-      if (!adj.length || !adj.every(a => freeSet.has(a))) continue;      // blocked by a fixed day: cannot repair
-      const plan = adj.map(a => ({a, Q: allIds.filter(n => n !== P && canTake(n, a)).sort((x, y) => erCount[x] - erCount[y])[0]}));
-      if (plan.some(x => !x.Q)) continue;
-      plan.forEach(x => moveER(x.a, P, x.Q));
-      moveER(d, null, P);
-      break;
-    }
-  }
-  // Still empty and the secretary allowed back-to-back shifts: use them, fewest ER shifts first.
-  for (const d of freeDays) {
-    if (erSched[d] || consecLeft <= 0) continue;
-    const fb = allIds.filter(n => !offMap2[n].has(d) && capOK(n)).sort((a, b) => erCount[a] - erCount[b])[0];
-    if (fb) { moveER(d, null, fb); consecLeft--; }
-  }
-  // R1 given up: days nobody could take → assign someone who is off that day (prefer not back-to-back, fewest shifts)
-  if (off.has('R1')) {
-    for (const d of freeDays) {
-      if (erSched[d]) continue;
-      const adjacent = n => (erDaysOfPerson[n].includes(d - 1) || erDaysOfPerson[n].includes(d + 1)) ? 1 : 0;
-      const fb = [...allIds].sort((a, b) => adjacent(a) - adjacent(b) || erCount[a] - erCount[b])[0];
-      if (fb) moveER(d, null, fb);
-    }
-  }
-
-  // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
-  rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
-  // Third pass (R10): spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
-  if (!off.has('R10')) rebalanceHolidayShifts(erSched, freeDays, state.staff.map(s => s.id), offMap2, erDaysOfPerson, isHol);
-  // Fourth pass (R11): people with 2 holiday ER shifts sit on the lower total tier
-  if (!off.has('R11')) lowerTierForHoliday2(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
-                                            month === 2 ? 2 : 3, maxER);
-  // Fifth pass (R13): holiday ER shifts go to people with fewer total ER shifts first
-  if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol);
-
-  // ── Build final schedule object ──
-  const sched = {};
-  for (let d = 1; d <= daysInMonth; d++) {
-    sched[d] = {};
-    if (traumaSched[d]) sched[d]['Trauma'] = traumaSched[d];
-    if (wardSched[d])   sched[d]['Ward']   = wardSched[d];
-    if (erSched[d])     sched[d]['ER']     = erSched[d];
-  }
-
-  // ── Check the result against the rules ──
   const fixedSet = new Set();
   Object.keys(traumaSched).forEach(d => fixedSet.add(`Trauma:${d}`));
   Object.keys(wardSchedInput).forEach(d => fixedSet.add(`Ward:${d}`));
   Object.keys(fixedER).forEach(d => fixedSet.add(`ER:${d}`));
-  const ev = evaluateRules(sched, {
+  const evalCtx = {
     year, month, daysInMonth, off, isHol, fixed: fixedSet, names: allIds, wardStaff: WARD_STAFF,
     offOf: (n, d) => offMap2[n]?.has(d),
     wardExpected: state.secretarySettings?.wardPreset?.[key] || [],
     traumaExpected: Object.keys(state.secretarySettings?.traumaPreset?.[key] || {}).map(Number),
     wanted: {Trauma: traumaSched, Ward: fixedWard, ER: fixedER},
-  });
+  };
+  const consecStart = consecLeft;
+  const buildSched = es => {
+    const out = {};
+    for (let d = 1; d <= daysInMonth; d++) {
+      out[d] = {};
+      if (traumaSched[d]) out[d]['Trauma'] = traumaSched[d];
+      if (wardSched[d])   out[d]['Ward']   = wardSched[d];
+      if (es[d])          out[d]['ER']     = es[d];
+    }
+    return out;
+  };
+  const runER = attempt => {
+    let consecLeft = consecStart;
+    let seed = (attempt + 1) * 2654435761 % 4294967296;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+    const J = {};
+    const jt = (id, d) => { if (attempt === 0) return 0; const k = id + ':' + d; if (!(k in J)) J[k] = rnd(); return J[k]; };
+    const shuffled = arr => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    // Coupled days (Trauma / Ward carry their person into ER)
+    const erSched = {};
+    traumaDays.forEach(d => { erSched[d] = traumaSched[d]; });
+    wardDays.forEach(d => { erSched[d] = wardSched[d]; });
+
+    // Apply secretary fixed assignments (override free days, skip already-coupled)
+    Object.entries(fixedER).forEach(([ds, name]) => {
+      const d = parseInt(ds);
+      if (!erSched[d]) {  // only assign if not already taken by trauma/ward coupling
+        const person = state.staff.find(s => s.id === name);
+        if (person) erSched[d] = name;
+      }
+    });
+
+    // Free ER days (no trauma, no ward, no fixed)
+    const freeDays = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      if (!erSched[d]) freeDays.push(d);
+    }
+
+    // Balance free ER across all 10 staff
+    const erCount = {}; // total ER per person
+    const erWkndCount = {};
+    state.staff.forEach(s => { erCount[s.id] = 0; erWkndCount[s.id] = 0; });
+    // Count coupled + fixed ER (they all count toward the person's total)
+    Object.entries(erSched).forEach(([d, n]) => {
+      if (erCount[n] !== undefined) {
+        erCount[n]++;
+        if (isWeekend(parseInt(d))) erWkndCount[n]++;
+      }
+    });
+
+    // Track each person's ER days for consecutive check
+    const erDaysOfPerson = {};
+    state.staff.forEach(s => { erDaysOfPerson[s.id] = []; });
+    Object.entries(erSched).forEach(([d, n]) => { erDaysOfPerson[n].push(parseInt(d)); });
+
+    const maxER = month === 2 ? 3 : 4;                              // R7 upper bound
+    const dayOrder = attempt % 2 === 0 ? freeDays : shuffled(freeDays);
+    const capOK = n => off.has('R7') || erCount[n] < maxER;
+    for (const d of dayOrder) {
+      const wknd = isWeekend(d);
+      const available = state.staff.filter(s => {
+        if (offMap2[s.id].has(d)) return false;                    // R1
+        if (!capOK(s.id)) return false;                            // R7
+        const myDays = erDaysOfPerson[s.id];
+        if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
+        return true;
+      }).sort((a, b) => {
+        // Balance first: fewest total ER shifts; preferred day / weekend count only break ties
+        if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
+        const aPref = preferMap[a.id].has(d) ? -1 : 0;
+        const bPref = preferMap[b.id].has(d) ? -1 : 0;
+        if (aPref !== bPref) return aPref - bPref;
+        if (wknd && erWkndCount[a.id] !== erWkndCount[b.id]) return erWkndCount[a.id] - erWkndCount[b.id];
+        return jt(a.id, d) - jt(b.id, d);          // attempt 0: no jitter (original behaviour)
+      });
+
+      if (available.length > 0) {
+        const chosen = available[0];
+        erSched[d] = chosen.id;
+        erCount[chosen.id]++;
+        if (wknd) erWkndCount[chosen.id]++;
+        erDaysOfPerson[chosen.id].push(d);
+      }
+    }
+
+    // Repair empty days: free a person who is blocked only by a neighbouring *free* ER day,
+    // by handing that neighbouring day to someone else. Works without any back-to-back shift.
+    const freeSet = new Set(freeDays);
+    const canTake = (n, day) => !offMap2[n].has(day) && capOK(n) && !erDaysOfPerson[n].some(x => x === day - 1 || x === day + 1);
+    const moveER = (day, from, to) => {
+      erSched[day] = to; erCount[to]++; erDaysOfPerson[to].push(day); if (isWeekend(day)) erWkndCount[to]++;
+      if (from) { erCount[from]--; erDaysOfPerson[from] = erDaysOfPerson[from].filter(x => x !== day); if (isWeekend(day)) erWkndCount[from]--; }
+    };
+    for (const d of freeDays) {
+      if (erSched[d]) continue;
+      for (const P of allIds) {
+        if (offMap2[P].has(d)) continue;
+        const adj = [d - 1, d + 1].filter(a => erDaysOfPerson[P].includes(a));
+        if (!adj.length || !adj.every(a => freeSet.has(a))) continue;      // blocked by a fixed day: cannot repair
+        const plan = adj.map(a => ({a, Q: allIds.filter(n => n !== P && canTake(n, a)).sort((x, y) => erCount[x] - erCount[y])[0]}));
+        if (plan.some(x => !x.Q)) continue;
+        plan.forEach(x => moveER(x.a, P, x.Q));
+        moveER(d, null, P);
+        break;
+      }
+    }
+    // Still empty and the secretary allowed back-to-back shifts: use them, fewest ER shifts first.
+    for (const d of freeDays) {
+      if (erSched[d] || consecLeft <= 0) continue;
+      const fb = allIds.filter(n => !offMap2[n].has(d) && capOK(n)).sort((a, b) => erCount[a] - erCount[b])[0];
+      if (fb) { moveER(d, null, fb); consecLeft--; }
+    }
+    // R1 given up: days nobody could take → assign someone who is off that day (prefer not back-to-back, fewest shifts)
+    if (off.has('R1')) {
+      for (const d of freeDays) {
+        if (erSched[d]) continue;
+        const adjacent = n => (erDaysOfPerson[n].includes(d - 1) || erDaysOfPerson[n].includes(d + 1)) ? 1 : 0;
+        const fb = [...allIds].sort((a, b) => adjacent(a) - adjacent(b) || erCount[a] - erCount[b])[0];
+        if (fb) moveER(d, null, fb);
+      }
+    }
+
+    // Second pass: even out total ER shifts (coupled Trauma/Ward days stay fixed)
+    rebalanceDays(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, preferMap);
+    // Third pass (R10): spread holiday ER shifts (coupled Trauma/Ward days stay fixed)
+    if (!off.has('R10')) rebalanceHolidayShifts(erSched, freeDays, state.staff.map(s => s.id), offMap2, erDaysOfPerson, isHol);
+    // Fourth pass (R11): people with 2 holiday ER shifts sit on the lower total tier
+    if (!off.has('R11')) lowerTierForHoliday2(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
+                                              month === 2 ? 2 : 3, maxER);
+    // Fifth pass (R13): holiday ER shifts go to people with fewer total ER shifts first
+    if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol);
+
+
+    return {erSched, erCount, erDaysOfPerson, freeDays};
+  };
+  let best = null;
+  const attemptsN = opts?.dryRun ? 6 : 30;
+  for (let attempt = 0; attempt < attemptsN; attempt++) {
+    const r = runER(attempt);
+    const sc = buildSched(r.erSched);
+    const e = evaluateRules(sc, evalCtx);
+    const score = (e.emptyER.length + e.emptyWard.length + e.emptyTrauma.length) * 10000 + e.violations.reduce((a, v) => a + v.details.length, 0);
+    if (!best || score < best.score) best = {r, sc, e, score};
+    if (best.score === 0) break;
+  }
+  const {erSched, erCount, erDaysOfPerson, freeDays} = best.r;
+  const sched = best.sc;
+  const ev = best.e;
   if (opts?.dryRun) return ev;                       // used to preview "what if this rule were given up"
 
   state.schedule[key] = sched;
