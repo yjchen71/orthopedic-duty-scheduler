@@ -947,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-25-emptyred';
+const APP_VERSION = '2026-11-26-fixedfix';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2575,8 +2575,10 @@ function runAutoSchedule() {
 
   // Pre-check: any day on which every doctor has marked off? Warn BEFORE scheduling.
   const noOneDays = [];
+  const fx = state.secretarySettings?.fixedAssign?.[key] || {};
+  const covered = d => fx.er?.[d] || fx.ward?.[d] || fx.trauma?.[d] || state.secretarySettings?.traumaPreset?.[key]?.[d];   // a designated person already covers this day
   for (let d = 1; d <= daysInMonth; d++) {
-    if (state.staff.every(s => (getReplies()[s.id]?.offDays || []).includes(d))) noOneDays.push(d);
+    if (!covered(d) && state.staff.every(s => (getReplies()[s.id]?.offDays || []).includes(d))) noOneDays.push(d);
   }
   if (noOneDays.length) {
     const ov = document.createElement('div');
@@ -2832,7 +2834,7 @@ function lowerTierForHoliday2(sched, movable, people, offMap, load, daysOf, isHo
 
 // Checks a finished schedule against the rules (skipping rules the secretary has given up).
 function evaluateRules(sched, c) {
-  const {year, month, daysInMonth, off, isHol, offOf, fixed, wardExpected, traumaExpected, names, wardStaff} = c;
+  const {year, month, daysInMonth, off, isHol, offOf, fixed, wardExpected, traumaExpected, names, wardStaff, wanted = {}} = c;
   const ev = {emptyER: [], emptyWard: [], emptyTrauma: [], violations: []};
   const dl = d => `${month}/${d}(${DOW[new Date(year, month - 1, d).getDay()]})`;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -2844,6 +2846,14 @@ function evaluateRules(sched, c) {
   const cnt = (t, n) => days.filter(d => sched[d]?.[t] === n).length;
   const hcnt = (t, n) => days.filter(d => sched[d]?.[t] === n && isHol(d)).length;
   const add = (id, details) => { if (!off.has(id) && details.length) ev.violations.push({id, title: RULE_NAMES[id], details}); };
+
+  // R4: the secretary's designations must appear exactly as requested (never droppable)
+  const r4 = [];
+  ['Trauma', 'Ward', 'ER'].forEach(t => Object.entries(wanted[t] || {}).forEach(([ds, who]) => {
+    const d = +ds, got = sched[d]?.[t];
+    if (got !== who) r4.push(`${dl(d)} ${t}：指定 ${who}，${got ? `實際排的是 ${got}` : '目前為空班'}${t === 'ER' && sched[d]?.Ward && got !== who ? '（該日是 Ward 日，ER 必須與 Ward 同一人）' : ''}`);
+  }));
+  add('R4', r4);
 
   const r1 = [];
   days.forEach(d => ['Trauma', 'Ward', 'ER'].forEach(t => {
@@ -2971,9 +2981,17 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   const fixedWard = (state.secretarySettings?.fixedAssign?.[key]?.ward) || {};
   Object.entries(fixedWard).forEach(([ds, name]) => {
     const d = parseInt(ds);
-    if (!traumaSched[d] && !wardDaysList.find(x=>x.day===d)) {
-      if (WARD_STAFF.includes(name)) wardDaysList.push({day: d, name});
-    }
+    if (traumaSched[d] || !WARD_STAFF.includes(name)) return;
+    const entry = wardDaysList.find(x => x.day === d);
+    if (!entry) wardDaysList.push({day: d, name});
+    else if (!entry.name) entry.name = name;           // the day was already listed as a Ward day: the fixed person takes it
+  });
+  // A day fixed for ER that is also a Ward day: ER on a Ward day is the Ward person (R3), so a Ward doctor fixed for ER takes the Ward too.
+  const fixedER0 = (state.secretarySettings?.fixedAssign?.[key]?.er) || {};
+  Object.entries(fixedER0).forEach(([ds, name]) => {
+    const d = parseInt(ds);
+    const entry = wardDaysList.find(x => x.day === d);
+    if (entry && !entry.name && !traumaSched[d] && WARD_STAFF.includes(name)) entry.name = name;
   });
 
   // Build wardSchedInput from pre-specified names; days with name=null are added later
@@ -3244,6 +3262,7 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     offOf: (n, d) => offMap2[n]?.has(d),
     wardExpected: state.secretarySettings?.wardPreset?.[key] || [],
     traumaExpected: Object.keys(state.secretarySettings?.traumaPreset?.[key] || {}).map(Number),
+    wanted: {Trauma: traumaSched, Ward: fixedWard, ER: fixedER},
   });
   if (opts?.dryRun) return ev;                       // used to preview "what if this rule were given up"
 
