@@ -947,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-26-multistart';
+const APP_VERSION = '2026-11-26-r13b';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2815,7 +2815,7 @@ const RULE_DROP_NOTE = {
 // Swaps are one-for-one (a holiday day for a weekday day), so every person's total stays unchanged.
 // First a direct swap between the two people; if that is blocked (off days / back-to-back), a two-step chain
 // through a third person (A→C, then C→B) is tried.
-function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol) {
+function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol, lo = 0, hi = Infinity) {
   const hc = n => daysOf[n].filter(isHol).length;
   const apply = (P, d, Q, e) => {                // P gives day d to Q, Q gives day e to P (unchecked)
     sched[d] = Q; sched[e] = P;
@@ -2836,6 +2836,17 @@ function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol) {
     for (const A of [...people].sort((a, b) => load[b] - load[a])) {
       for (const B of [...people].sort((a, b) => load[a] - load[b])) {
         if (load[A] <= load[B] || hc(A) <= hc(B)) continue;
+        // Option 1: A is exactly one shift ahead → hand B one of A's weekday ER days. The totals flip
+        // (B now has more, A fewer) while the holiday counts stay as they are, so B (fewer holidays) is the busier one.
+        if (load[A] - load[B] === 1 && load[A] - 1 >= lo && load[B] + 1 <= hi) {
+          const t = wk(A).find(d => !offMap[B]?.has(d) && !daysOf[B].includes(d - 1) && !daysOf[B].includes(d + 1));
+          if (t !== undefined) {
+            sched[t] = B; load[A]--; load[B]++;
+            daysOf[A] = daysOf[A].filter(x => x !== t); daysOf[B] = daysOf[B].concat(t);
+            moved = true; break outer;
+          }
+        }
+        // Option 2: swap a holiday day of A with a weekday day of B (totals unchanged)
         for (const d of hol(A)) {
           for (const e of wk(B)) if (swap(A, d, B, e)) { moved = true; break outer; }
           for (const C of people) {
@@ -3327,7 +3338,8 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     if (!off.has('R11')) lowerTierForHoliday2(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
                                               month === 2 ? 2 : 3, maxER);
     // Fifth pass (R13): holiday ER shifts go to people with fewer total ER shifts first
-    if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol);
+    if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
+                                        off.has('R7') ? 0 : (month === 2 ? 2 : 3), off.has('R7') ? Infinity : maxER);
 
 
     return {erSched, erCount, erDaysOfPerson, freeDays};
