@@ -947,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-26-r13b';
+const APP_VERSION = '2026-11-27-holfirst';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -3224,7 +3224,7 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     let seed = (attempt + 1) * 2654435761 % 4294967296;
     const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
     const J = {};
-    const jt = (id, d) => { if (attempt === 0) return 0; const k = id + ':' + d; if (!(k in J)) J[k] = rnd(); return J[k]; };
+    const jt = (id, d) => { if (attempt < 2) return 0; const k = id + ':' + d; if (!(k in J)) J[k] = rnd(); return J[k]; };
     const shuffled = arr => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
     // Coupled days (Trauma / Ward carry their person into ER)
     const erSched = {};
@@ -3264,7 +3264,15 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
     Object.entries(erSched).forEach(([d, n]) => { erDaysOfPerson[n].push(parseInt(d)); });
 
     const maxER = month === 2 ? 3 : 4;                              // R7 upper bound
-    const dayOrder = attempt % 2 === 0 ? freeDays : shuffled(freeDays);
+    // Order of work: Ward is already fixed above; next the ER holiday days (R10/R13 are decided here), then the weekdays.
+    // attempt 0 = holiday-first (recommended order), attempt 1 = plain chronological (old behaviour), later = randomised variants.
+    const holDays = freeDays.filter(isHol), wkdDays = freeDays.filter(d => !isHol(d));
+    const mode = attempt === 0 ? 'hol' : attempt === 1 ? 'chrono' : ['holRand', 'holChrono', 'rand'][(attempt - 2) % 3];
+    const holFirst = mode === 'hol' || mode === 'holRand' || mode === 'holChrono';
+    const dayOrder = mode === 'hol' || mode === 'holChrono' ? [...holDays, ...wkdDays]
+                   : mode === 'holRand' ? [...shuffled(holDays), ...shuffled(wkdDays)]
+                   : mode === 'rand' ? shuffled(freeDays) : freeDays;
+    const holN = n => erDaysOfPerson[n].filter(isHol).length;
     const capOK = n => off.has('R7') || erCount[n] < maxER;
     for (const d of dayOrder) {
       const wknd = isWeekend(d);
@@ -3275,6 +3283,8 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
         if (myDays.includes(d-1) || myDays.includes(d+1)) return false;
         return true;
       }).sort((a, b) => {
+        // Holiday day (holiday-first modes): fewest holiday ER shifts so far first (R10), then fewest total shifts (R13)
+        if (holFirst && wknd && holN(a.id) !== holN(b.id)) return holN(a.id) - holN(b.id);
         // Balance first: fewest total ER shifts; preferred day / weekend count only break ties
         if (erCount[a.id] !== erCount[b.id]) return erCount[a.id] - erCount[b.id];
         const aPref = preferMap[a.id].has(d) ? -1 : 0;
