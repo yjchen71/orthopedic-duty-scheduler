@@ -453,6 +453,18 @@ tbody td { padding: 10px 14px; vertical-align: middle; }
 }
 td:hover .add-slot-btn { display: block; }
 .add-slot-btn:hover { background: var(--surface2); }
+.cal-cell { border-radius: 6px; border: 1.5px solid var(--border); background: var(--surface); padding: 4px 2px; text-align: center; line-height: 1.25; }
+.cal-cell small { display: block; font-size: 9px; color: var(--fg3); }
+.cal-er-block { background: var(--danger-light, #fee2e2); color: var(--danger); border-color: var(--danger); font-weight: 700; }
+.cal-er-block small { color: var(--danger); }
+.cal-ward-block { background: #ede9fe; color: #6d28d9; border-color: #6d28d9; font-weight: 700; }
+.cal-ward-block small { color: #6d28d9; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cal-ward-block { background: #2e1065; color: #c4b5fd; border-color: #c4b5fd; }
+  :root:not([data-theme="light"]) .cal-ward-block small { color: #c4b5fd; }
+}
+:root[data-theme="dark"] .cal-ward-block { background: #2e1065; color: #c4b5fd; border-color: #c4b5fd; }
+:root[data-theme="dark"] .cal-ward-block small { color: #c4b5fd; }
 .empty-slot {
   display: block; width: 100%; cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 0; text-align: center;
   border-radius: 4px; border: 1.5px solid var(--danger); background: var(--danger-light, #fee2e2); color: var(--danger);
@@ -947,7 +959,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-27-holfirst';
+const APP_VERSION = '2026-11-27-availcal';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -1441,8 +1453,50 @@ function renderReplies() {
     : `<div class="info-box" style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
          <span>🔓 本月開放填寫中。執行「自動排班」後會自動鎖定。</span>
          <button class="btn btn-sm btn-secondary" onclick="lockMonthNow()">立即鎖定</button></div>`;
+  // Early warning: days on which every ER doctor (10) or every Ward doctor (7) has marked off
+  const {year: cy, month: cm} = state.currentMonth;
+  const cDays = new Date(cy, cm, 0).getDate();
+  const repAll = getReplies();
+  const isOffOn = (n, d) => (repAll[n]?.offDays || []).includes(d);
+  const erNames = state.staff.map(s => s.id);
+  const wardNames = WARD_STAFF.filter(n => erNames.includes(n));
+  const availByDay = {};
+  const erBlocked = [], wardBlocked = [];
+  for (let d = 1; d <= cDays; d++) {
+    const e = erNames.filter(n => !isOffOn(n, d)).length, w = wardNames.filter(n => !isOffOn(n, d)).length;
+    availByDay[d] = {e, w};
+    if (erNames.length && e === 0) erBlocked.push(d);
+    if (wardNames.length && w === 0) wardBlocked.push(d);
+  }
+  const dlab = d => `${cm}/${d}(${DOW[new Date(cy, cm - 1, d).getDay()]})`;
+  const calCells = Array.from({length: new Date(cy, cm - 1, 1).getDay()}, () => '<div></div>').join('') +
+    Array.from({length: cDays}, (_, i) => {
+      const d = i + 1, {e, w} = availByDay[d];
+      const cls = e === 0 ? 'cal-er-block' : (w === 0 ? 'cal-ward-block' : '');
+      const tag = e === 0 && w === 0 ? 'ER＋Ward 無人' : e === 0 ? 'ER 無人' : w === 0 ? 'Ward 無人' : `ER ${e}・W ${w}`;
+      return `<div class="cal-cell ${cls}" title="${dlab(d)}：ER 可值 ${e}／${erNames.length} 人，Ward 可值 ${w}／${wardNames.length} 人"><div style="font-size:13px">${d}</div><small>${tag}</small></div>`;
+    }).join('');
+  const availCard = `
+    <div class="card" style="margin-bottom:16px;${erBlocked.length || wardBlocked.length ? 'border:2px solid var(--danger)' : ''}">
+      <div class="card-header"><h2>📆 每日可值班人數（${cy}年${cm}月）</h2></div>
+      <div class="card-body">
+        ${erBlocked.length || wardBlocked.length ? `<div style="background:var(--danger-light, #fee2e2);border-radius:6px;padding:10px 14px;margin-bottom:12px;color:var(--danger);font-size:13px">
+          <strong>⚠️ 請盡早請醫師調整預假：</strong>
+          ${erBlocked.length ? `<div>🔴 ER 全部 ${erNames.length} 位醫師都預假：${erBlocked.map(dlab).join('、')}</div>` : ''}
+          ${wardBlocked.length ? `<div style="color:#6d28d9">🟣 Ward 全部 ${wardNames.length} 位醫師都預假：${wardBlocked.map(dlab).join('、')}</div>` : ''}
+        </div>` : ''}
+        <div style="max-width:520px">
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+            ${['日','一','二','三','四','五','六'].map(h => `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--fg3)">${h}</div>`).join('')}
+            ${calCells}
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--fg3);margin-top:10px">每格下方：ER 可值班人數・Ward 可值班人數（尚未回覆的醫師視為可值班）。紅色＝ER 無人可值；紫色＝Ward 無人可值。</div>
+      </div>
+    </div>`;
   el.innerHTML = `
     ${lockBanner}
+    ${availCard}
     <!-- 通知訊息卡 -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
