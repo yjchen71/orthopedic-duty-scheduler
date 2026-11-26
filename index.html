@@ -947,7 +947,7 @@ function buildNov2026Schedule() {
 // replies table: (month 'YYYY-MM', doctor_name) -> off_days[], prefer_days[]
 // Doctors (anonymous) write through the submit_reply RPC; the secretary signs in
 // with Supabase Auth and reads/writes tables directly (see supabase/schema.sql).
-const APP_VERSION = '2026-11-26-fixedfix';
+const APP_VERSION = '2026-11-26-r13';
 const sb = window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY);
 let dbReplies = {};          // { name: { offDays, preferDays, submittedAt } }
 let _isSecretary = false;
@@ -2642,7 +2642,7 @@ function showAutoScheduleDialog(year, month, daysInMonth, key) {
         <div class="info-box" style="font-size:12px;line-height:1.7">
           <strong>排班規則：</strong><br>
           <u>硬性</u>　R1 預假不排班　R2 人員資格　R3 每天一位 ER，Trauma／Ward 日 ER 同一人　R4 秘書指定優先　R5 不連續值 Ward<br>
-          <u>可放棄</u>　R6 不連續值 ER　R7 ER 總班數（二月 2～3、其他月 3～4）　R8 Ward 每人 1～2 班　R9 Ward 兩班者皆平日　R10 ER 假日班差距 ≤1　R11 假日 ER 2 班者總班數為較少一檔<br>
+          <u>可放棄</u>　R6 不連續值 ER　R7 ER 總班數（二月 2～3、其他月 3～4）　R8 Ward 每人 1～2 班　R9 Ward 兩班者皆平日　R10 ER 假日班差距 ≤1　R11 假日 ER 2 班者總班數為較少一檔　R13 總班數多者，假日 ER 優先給總班數少者<br>
           <span style="color:var(--fg3)">排不出班時，可在結果視窗選擇放棄哪一條規則後重排。</span>
         </div>
 
@@ -2796,9 +2796,10 @@ const RULE_NAMES = {
   R10: 'ER 假日班差距不超過 1 班',
   R11: 'ER 假日班有 2 班者，其 ER 總班數為當月較少的一檔（二月 2 班、其他月 3 班）',
   R12: '醫師「期待值班」日期（加分）',
+  R13: 'ER 總班數較多的人，ER 假日班優先給總班數較少的人',
 };
 // Rules the secretary may choose to give up when a complete schedule is not possible (R2–R5 are never droppable)
-const DROPPABLE_RULES = ['R1', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11'];
+const DROPPABLE_RULES = ['R1', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R13'];
 const RULE_DROP_NOTE = {
   R1: '無人可排的日子，改排給預假的人',
   R6: '允許同一人連續兩天值 ER（只在排不出來時才使用）',
@@ -2807,7 +2808,53 @@ const RULE_DROP_NOTE = {
   R9: '允許 Ward 兩班者含假日班',
   R10: '不再要求 ER 假日班差距不超過 1',
   R11: '不再要求假日 ER 2 班者落在較少的一檔',
+  R13: '不再要求假日 ER 班依總班數由少到多分配',
 };
+
+// Rule R13: whoever has more ER shifts in total should not have more holiday ER shifts than someone with fewer.
+// Swaps are one-for-one (a holiday day for a weekday day), so every person's total stays unchanged.
+// First a direct swap between the two people; if that is blocked (off days / back-to-back), a two-step chain
+// through a third person (A→C, then C→B) is tried.
+function holidayToLighter(sched, movable, people, offMap, load, daysOf, isHol) {
+  const hc = n => daysOf[n].filter(isHol).length;
+  const apply = (P, d, Q, e) => {                // P gives day d to Q, Q gives day e to P (unchecked)
+    sched[d] = Q; sched[e] = P;
+    daysOf[P] = daysOf[P].filter(x => x !== d).concat(e); daysOf[Q] = daysOf[Q].filter(x => x !== e).concat(d);
+  };
+  const swap = (P, d, Q, e) => {                 // same, but only if nobody is off and nobody ends up back-to-back
+    if (offMap[Q]?.has(d) || offMap[P]?.has(e)) return false;
+    const pd = daysOf[P].filter(x => x !== d), qd = daysOf[Q].filter(x => x !== e);
+    if (qd.includes(d - 1) || qd.includes(d + 1) || pd.includes(e - 1) || pd.includes(e + 1)) return false;
+    apply(P, d, Q, e);
+    return true;
+  };
+  const hol = n => movable.filter(d => sched[d] === n && isHol(d));
+  const wk = n => movable.filter(d => sched[d] === n && !isHol(d));
+  for (let g = 0; g < 300; g++) {
+    let moved = false;
+    outer:
+    for (const A of [...people].sort((a, b) => load[b] - load[a])) {
+      for (const B of [...people].sort((a, b) => load[a] - load[b])) {
+        if (load[A] <= load[B] || hc(A) <= hc(B)) continue;
+        for (const d of hol(A)) {
+          for (const e of wk(B)) if (swap(A, d, B, e)) { moved = true; break outer; }
+          for (const C of people) {
+            if (C === A || C === B) continue;
+            for (const e1 of wk(C)) {
+              if (!swap(A, d, C, e1)) continue;
+              for (const h of hol(C)) {
+                if (h === d) continue;
+                for (const e2 of wk(B)) if (swap(C, h, B, e2)) { moved = true; break outer; }
+              }
+              apply(A, e1, C, d);                // chain failed: undo the first swap
+            }
+          }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
 
 // Rule R11: a person with 2 holiday ER shifts should sit on the lower total tier. Hands one weekday free ER day
 // to someone with fewer total shifts (and fewer than 2 holiday shifts), keeping everybody within [lowTier, maxTotal].
@@ -2876,6 +2923,12 @@ function evaluateRules(sched, c) {
 
   const eh = names.map(n => hcnt('ER', n));
   if (Math.max(...eh) - Math.min(...eh) > 1) add('R10', [`各人 ER 假日班：${names.map((n, i) => `${n} ${eh[i]}`).join('、')}`]);
+  const r13 = [];
+  names.forEach(A => names.forEach(B => {
+    if (cnt('ER', A) > cnt('ER', B) && hcnt('ER', A) > hcnt('ER', B))
+      r13.push(`${A}（ER ${cnt('ER', A)} 班、假日 ${hcnt('ER', A)} 班）比 ${B}（ER ${cnt('ER', B)} 班、假日 ${hcnt('ER', B)} 班）總班數多、假日班卻不少`);
+  }));
+  add('R13', r13);
   add('R11', names.filter(n => hcnt('ER', n) >= 2 && cnt('ER', n) > lo).map(n => `${n}：假日 ER ${hcnt('ER', n)} 班，ER 總班數 ${cnt('ER', n)} 班（應為 ${lo} 班）`));
   return ev;
 }
@@ -3242,6 +3295,8 @@ function executeAutoSchedule(year, month, daysInMonth, key, opts) {
   // Fourth pass (R11): people with 2 holiday ER shifts sit on the lower total tier
   if (!off.has('R11')) lowerTierForHoliday2(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol,
                                             month === 2 ? 2 : 3, maxER);
+  // Fifth pass (R13): holiday ER shifts go to people with fewer total ER shifts first
+  if (!off.has('R13')) holidayToLighter(erSched, freeDays, state.staff.map(s => s.id), offMap2, erCount, erDaysOfPerson, isHol);
 
   // ── Build final schedule object ──
   const sched = {};
